@@ -1,0 +1,134 @@
+package task
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+var t0 = time.Unix(1_700_000_000, 0)
+
+func TestClaimAndRelease(t *testing.T) {
+	tk := &Task{Reporter: "UREPORT01"}
+	if e := tk.React(Claim, "UALICE001", true, t0); e != Changed || !tk.IsOwner("UALICE001") {
+		t.Fatalf("claim: effect %v owners %v", e, tk.Owners)
+	}
+	if e := tk.React(Claim, "UALICE001", true, t0); e != NoChange {
+		t.Fatalf("double claim should be a no-op, got %v", e)
+	}
+	tk.React(Claim, "UBOB00001", true, t0)
+	if strings.Join(tk.Owners, ",") != "UALICE001,UBOB00001" {
+		t.Fatalf("owners keep claim order, got %v", tk.Owners)
+	}
+	tk.React(InProgress, "UALICE001", true, t0)
+	tk.React(Claim, "UALICE001", false, t0)
+	if tk.Status != InProgress {
+		t.Fatalf("status survives while an owner remains, got %q", tk.Status)
+	}
+	tk.React(Claim, "UBOB00001", false, t0)
+	if len(tk.Owners) != 0 || tk.Status != "" {
+		t.Fatalf("last release resets status, got owners %v status %q", tk.Owners, tk.Status)
+	}
+}
+
+func TestStatusOnlyFromOwners(t *testing.T) {
+	tk := &Task{Reporter: "UREPORT01"}
+	if e := tk.React(Done, "UMALLORY1", true, t0); e != Denied || tk.Status != "" {
+		t.Fatalf("non-owner status: effect %v status %q", e, tk.Status)
+	}
+	if e := tk.React(Done, "UMALLORY1", false, t0); e != NoChange {
+		t.Fatalf("non-owner removal should be silent, got %v", e)
+	}
+	tk.React(Claim, "UALICE001", true, t0)
+	if e := tk.React(Blocked, "UALICE001", true, t0); e != Changed || tk.Status != Blocked {
+		t.Fatalf("owner status: effect %v status %q", e, tk.Status)
+	}
+	if e := tk.React(InProgress, "UALICE001", false, t0); e != NoChange || tk.Status != Blocked {
+		t.Fatalf("removing a non-current status is a no-op, got %v %q", e, tk.Status)
+	}
+	if e := tk.React(Blocked, "UALICE001", false, t0); e != Changed || tk.Status != "" {
+		t.Fatalf("removing the current status clears it, got %v %q", e, tk.Status)
+	}
+}
+
+func TestNeedsInfoRoundTrip(t *testing.T) {
+	tk := &Task{Reporter: "UREPORT01"}
+	tk.React(Claim, "UALICE001", true, t0)
+	if e := tk.React(NeedsInfo, "UALICE001", true, t0); e != AskReporter {
+		t.Fatalf("needs_info should ask the reporter, got %v", e)
+	}
+	if e := tk.Reply("USOMEONE1", t0); e != NoChange || tk.Status != NeedsInfo {
+		t.Fatalf("a bystander reply does not answer, got %v %q", e, tk.Status)
+	}
+	if e := tk.Reply("UREPORT01", t0); e != NotifyOwners || tk.Status != "" {
+		t.Fatalf("reporter reply clears needs_info, got %v %q", e, tk.Status)
+	}
+}
+
+func TestStale(t *testing.T) {
+	day := 24 * time.Hour
+	tk := &Task{Owners: []string{"UALICE001"}, LastActivity: t0}
+	if tk.Stale(t0.Add(day-time.Minute), day) {
+		t.Fatal("not stale before the window")
+	}
+	if !tk.Stale(t0.Add(day), day) {
+		t.Fatal("stale after the window")
+	}
+	tk.RemindedAt = t0.Add(day)
+	if tk.Stale(t0.Add(day+time.Hour), day) {
+		t.Fatal("no second reminder inside the window")
+	}
+	tk.Status = Blocked
+	if tk.Stale(t0.Add(10*day), day) {
+		t.Fatal("blocked tasks are waiting on someone else, no nudge")
+	}
+	if (&Task{LastActivity: t0}).Stale(t0.Add(10*day), day) {
+		t.Fatal("unclaimed tasks are not nudged")
+	}
+	tk.Status = ""
+	tk.Reply("UALICE001", t0.Add(10*day))
+	if tk.Stale(t0.Add(10*day+time.Hour), day) {
+		t.Fatal("owner reply resets the clock")
+	}
+}
+
+func TestExcerpt(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"short", "short"},
+		{"first line\nsecond", "first line"},
+		{"abcdefgh <@U123456789> tail", "abcdefgh…"},
+		{"abcdefgh &amp; more text", "abcdefgh…"},
+		{"abcdefghij klm", "abcdefghij…"},
+	}
+	for _, c := range cases {
+		if got := Excerpt(c.in, 10); got != c.want {
+			t.Errorf("Excerpt(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestMention(t *testing.T) {
+	if Mention("U0123ABCD") != "<@U0123ABCD>" || Mention("Uptime Robot") != "Uptime Robot" {
+		t.Fatal("only real user IDs become mentions")
+	}
+}
+
+func TestBoard(t *testing.T) {
+	emoji := map[Action]string{Claim: "raising_hand", InProgress: "construction"}
+	tasks := []Task{
+		{Text: "db down", Permalink: "https://x/p1", Owners: []string{"UALICE001"}, Status: InProgress},
+		{Text: "typo on pricing page", Permalink: "https://x/p2"},
+	}
+	b := Board(tasks, emoji, 1, t0)
+	for _, want := range []string{"2 open", ":construction: in progress", "<@UALICE001>", "<https://x/p1|open>", "…and 1 more"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("board missing %q:\n%s", want, b)
+		}
+	}
+	if strings.Contains(b, "typo") {
+		t.Errorf("board should stop at max:\n%s", b)
+	}
+	if !strings.Contains(Board(nil, emoji, 10, t0), "Nothing open") {
+		t.Error("empty board")
+	}
+}

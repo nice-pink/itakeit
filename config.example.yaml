@@ -1,0 +1,24 @@
+# Channel ID of the dedicated channel (not its name). Find it under channel details -> About.
+channel: C0123456789
+
+# SQLite file holding owners, statuses and the board message timestamp.
+db_path: itakeit.db
+
+# Owners of a claimed/investigating/in-progress task get one thread reminder after
+# this many hours without a claim, status change or thread reply from an owner.
+stale_after_hours: 48
+
+# Maximum tasks listed on the pinned board.
+board_max_tasks: 50
+
+# Action -> reaction names. The first emoji of each action is the one shown in
+# cards and on the board. Omit an action to disable it. If this block is present
+# it replaces the defaults entirely. Actions: claim (required), investigating,
+# in_progress, needs_info, blocked, done.
+emoji:
+  claim: [raising_hand]
+  investigating: [eyes]
+  in_progress: [construction]
+  needs_info: [question]
+  blocked: [no_entry]
+  done: [white_check_mark]

@@ -1,0 +1,27 @@
+display_information:
+  name: I take it
+  description: Claim issues with an emoji, track status in threads.
+features:
+  bot_user:
+    display_name: itakeit
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - groups:history
+      - chat:write
+      - reactions:read
+      - pins:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - reaction_added
+      - reaction_removed
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

@@ -1,0 +1,7 @@
+bin/
+*.db
+*.db-shm
+*.db-wal
+config.yaml
+.env
+cover.out

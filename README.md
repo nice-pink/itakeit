@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/pixel_turtle.png" alt="itakeit pixel turtle" width="200"></p>
+
 # I take it
 
 A Slack bot that turns every message in one dedicated channel into a task people can claim with an emoji.

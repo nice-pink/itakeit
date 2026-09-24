@@ -5,3 +5,8 @@ bin/
 config.yaml
 .env
 cover.out
+
+.agent/
+.claude/
+CLAUDE.local.md
+events.jsonl

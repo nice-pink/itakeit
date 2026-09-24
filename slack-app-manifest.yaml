@@ -1,6 +1,6 @@
 display_information:
   name: I take it
-  description: Claim issues with an emoji, track status in threads.
+  description: Claim issues with an reaction, track status in threads.
   long_description: Post a ticket in your channel. Users can claim it via reaction
     and share infos in thread. They update the status via reactions and receive reminders
     on stale tickets. No matter if there is an incident or just a very agile moving

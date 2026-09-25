@@ -36,6 +36,7 @@ type API interface {
 	GetPermalink(p *slack.PermalinkParameters) (string, error)
 	GetConversationHistory(p *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
 	AddPin(channel string, item slack.ItemRef) error
+	GetReactions(item slack.ItemRef, p slack.GetReactionsParameters) (slack.ReactedItem, error)
 }
 
 type Bot struct {
@@ -309,7 +310,13 @@ func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added boo
 	if t == nil {
 		return
 	}
-	switch t.React(a, user, added, b.now()) {
+	var eff task.Effect
+	if b.cfg.StatusClaims {
+		eff = t.ReactOpen(a, user, added, !added && t.IsOwner(user) && b.holding(t, user, reaction), b.now())
+	} else {
+		eff = t.React(a, user, added, b.now())
+	}
+	switch eff {
 	case task.NoChange:
 		return
 	case task.Denied:
@@ -324,6 +331,29 @@ func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added boo
 	b.save(t)
 	b.updateCard(t)
 	b.refreshBoard()
+}
+
+// holding reports whether user still has a claim or status reaction on the task
+// message other than removed, which the removal event already rules out even if
+// reactions.get still lists it. When Slack can't be asked it reports true: a user switching status
+// adds the new reaction before removing the old one, and dropping them then
+// would be wrong far more often than keeping a leaver.
+func (b *Bot) holding(t *task.Task, user, removed string) bool {
+	r, err := b.api.GetReactions(slack.ItemRef{Channel: t.Channel, Timestamp: t.TS}, slack.GetReactionsParameters{Full: true})
+	if err != nil {
+		slog.Warn("get reactions", "ts", t.TS, "err", err)
+		return true
+	}
+	removed, _, _ = strings.Cut(removed, "::")
+	for _, re := range r.Reactions {
+		if base, _, _ := strings.Cut(re.Name, "::"); base == removed {
+			continue
+		}
+		if _, ok := b.cfg.Action(re.Name); ok && slices.Contains(re.Users, user) {
+			return true
+		}
+	}
+	return false
 }
 
 // adopt turns a top-level message that predates the bot (or was missed while it
@@ -370,8 +400,12 @@ func (b *Bot) remindStale() {
 		if !t.Stale(now, b.cfg.StaleAfter()) {
 			continue
 		}
-		b.say(t, fmt.Sprintf("%s: no update here for %s. Still on it? Post a status here, or remove your :%s: to hand it back.",
-			task.Mentions(t.Owners), hours(now.Sub(t.LastActivity)), b.emoji[task.Claim]))
+		handBack := fmt.Sprintf("remove your :%s:", b.emoji[task.Claim])
+		if b.cfg.StatusClaims {
+			handBack = "remove your reactions"
+		}
+		b.say(t, fmt.Sprintf("%s: no update here for %s. Still on it? Post a status here, or %s to hand it back.",
+			task.Mentions(t.Owners), hours(now.Sub(t.LastActivity)), handBack))
 		t.RemindedAt = now
 		b.save(t)
 	}
@@ -398,7 +432,7 @@ func (b *Bot) updateCard(t *task.Task) {
 	// If Slack rejects the checklist blocks, fall back to the plain-text card, so
 	// a checklist can never cost a task its card. Other errors (rate limits,
 	// timeouts) must not strip the checkboxes or post a second card.
-	if err := b.putCard(t, cardBlocks(t, b.emoji)); err != nil && strings.HasPrefix(err.Error(), "invalid_blocks") {
+	if err := b.putCard(t, cardBlocks(t, b.emoji, b.cfg.StatusClaims)); err != nil && strings.HasPrefix(err.Error(), "invalid_blocks") {
 		b.putCard(t, nil)
 	}
 }
@@ -406,7 +440,7 @@ func (b *Bot) updateCard(t *task.Task) {
 // putCard edits or posts the card. A nil blocks renders text only and clears
 // blocks on an edit.
 func (b *Bot) putCard(t *task.Task, blocks []slack.Block) error {
-	opts := []slack.MsgOption{slack.MsgOptionText(task.Card(*t, b.emoji), false), slack.MsgOptionBlocks(blocks...)}
+	opts := []slack.MsgOption{slack.MsgOptionText(task.Card(*t, b.emoji, b.cfg.StatusClaims), false), slack.MsgOptionBlocks(blocks...)}
 	if t.CardTS != "" {
 		_, _, _, err := b.api.UpdateMessage(t.Channel, t.CardTS, opts...)
 		if err == nil || err.Error() != "message_not_found" {
@@ -435,8 +469,8 @@ const maxCardItems = 48
 
 // cardBlocks renders the card text, then one single-option checkbox group per
 // checklist item.
-func cardBlocks(t *task.Task, emoji map[task.Action]string) []slack.Block {
-	blocks := []slack.Block{slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, task.Card(*t, emoji), false, false), nil, nil)}
+func cardBlocks(t *task.Task, emoji map[task.Action]string, statusClaims bool) []slack.Block {
+	blocks := []slack.Block{slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, task.Card(*t, emoji, statusClaims), false, false), nil, nil)}
 	items := t.Checklist()
 	for _, it := range items[:min(len(items), maxCardItems)] {
 		o := slack.NewOptionBlockObject(it.Key, slack.NewTextBlockObject(slack.MarkdownType, optionText(it.Text), false, false), nil)

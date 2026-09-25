@@ -18,6 +18,7 @@ type Config struct {
 	StaleAfterHours int                      `yaml:"stale_after_hours"`
 	BoardMaxTasks   int                      `yaml:"board_max_tasks"`
 	DoneRetainDays  int                      `yaml:"done_retain_days"`
+	StatusClaims    bool                     `yaml:"status_claims"`
 	Emoji           map[task.Action][]string `yaml:"emoji"`
 
 	byEmoji map[string]task.Action

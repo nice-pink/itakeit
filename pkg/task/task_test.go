@@ -180,3 +180,28 @@ func TestSetTextPrunesTicks(t *testing.T) {
 		t.Fatalf("removed item's tick should go, kept one should stay: %v", tk.Checks)
 	}
 }
+
+func TestReactOpen(t *testing.T) {
+	tk := &Task{Reporter: "UREPORT01"}
+	if e := tk.ReactOpen(Blocked, "UALICE001", true, false, t0); e != Changed || !tk.IsOwner("UALICE001") || tk.Status != Blocked {
+		t.Fatalf("status without claim: effect %v owners %v status %q", e, tk.Owners, tk.Status)
+	}
+	if e := tk.ReactOpen(NeedsInfo, "UBOB00001", true, false, t0); e != AskReporter || !tk.IsOwner("UBOB00001") {
+		t.Fatalf("needs_info keeps its effect when it also claims, got %v", e)
+	}
+	if e := tk.ReactOpen(Claim, "UBOB00001", true, false, t0); e != NoChange {
+		t.Fatalf("claiming when already an owner is a no-op, got %v", e)
+	}
+	if e := tk.ReactOpen(Claim, "UBOB00001", false, true, t0); e != NoChange || !tk.IsOwner("UBOB00001") {
+		t.Fatalf("an owner still holding a status stays, got %v %v", e, tk.Owners)
+	}
+	if e := tk.ReactOpen(NeedsInfo, "UBOB00001", false, false, t0); e != Changed || tk.IsOwner("UBOB00001") || tk.Status != "" {
+		t.Fatalf("last reaction removed: effect %v owners %v status %q", e, tk.Owners, tk.Status)
+	}
+	if e := tk.ReactOpen(Blocked, "UALICE001", false, false, t0); e != Changed || len(tk.Owners) != 0 || tk.Status != "" {
+		t.Fatalf("last owner gone resets: effect %v owners %v status %q", e, tk.Owners, tk.Status)
+	}
+	if e := tk.ReactOpen(Done, "UMALLORY1", false, false, t0); e != NoChange {
+		t.Fatalf("removal by a non-owner is silent, got %v", e)
+	}
+}

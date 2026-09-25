@@ -31,7 +31,7 @@ The manifest requests these bot scopes:
 |---|---|
 | `channels:history`, `groups:history` | receiving messages in a public or private channel, and looking up messages posted before the bot was running |
 | `chat:write` | status cards, the board, pings, private "only owners can…" hints |
-| `reactions:read` | receiving reaction events |
+| `reactions:read` | receiving reaction events, and with `status_claims` checking who still reacts on a task |
 | `pins:write` | pinning the board |
 
 The manifest also turns on **Interactivity**, which the checklist checkboxes need. Socket Mode delivers the clicks, so no request URL is required. An app created from an older manifest needs it switched on under **Interactivity & Shortcuts**.
@@ -92,18 +92,19 @@ Run **exactly one instance** per channel. Two instances would both reply to ever
 | owner | reacts ❓ | reporter is pinged in the thread |
 | reporter | replies in the thread while ❓ is set | owners are pinged and the status falls back to claimed |
 | owner | replies in the thread | counts as activity and resets the reminder clock |
-| non-owner | reacts with a status emoji | ignored, and the user gets a private hint to claim first |
+| non-owner | reacts with a status emoji | ignored, and the user gets a private hint to claim first. With `status_claims: true` it makes them an owner and sets the status instead. |
+| owner | removes their last 🙋 or status reaction, with `status_claims: true` | stops owning it. An owner who still has any 🙋 or status reaction on the message stays one. |
 | anyone | ticks a checklist item on the status card | card and board show progress. An owner's tick counts as activity. Ticking the last item pings the owners (or the reporter, if unclaimed) to set ✅. |
 
 Reactions only count on the task message itself. Reactions on thread replies, the card or the board are ignored. Skin tone variants count as the base emoji.
 
-Messages posted while the bot was offline are not lost. The first 🙋 or status reaction on such a message turns it into a task, but only 🙋 makes the reactor an owner. Reactions *removed* while the bot was offline are not replayed. Remove the emoji and add it again to resync.
+Messages posted while the bot was offline are not lost. The first 🙋 or status reaction on such a message turns it into a task, but only 🙋 makes the reactor an owner, unless `status_claims` is on. Reactions *removed* while the bot was offline are not replayed. Remove the emoji and add it again to resync.
 
 A checklist line is `[ ] text` or `[x] text` on its own line, optionally after a list bullet, so a Slack bulleted list works. `[x]` starts ticked. Once an item is ticked or unticked on the card, the card wins over the message's `[ ]`/`[x]`. Ticks are stored by the item's text, so they survive reordering the message. Changing an item's text, or deleting an earlier line with the same text, starts it over from what the message says. The card shows up to 48 items and counts the rest. Items past 48 can only be ticked with `[x]` in the message. Cards posted before checklist support get their checkboxes on the task's next change.
 
 Editing the task message updates its line on the board. Deleting it removes the task and its status card.
 
-To reopen a done task that has no owners left, claim it with 🙋 and then set any other status.
+To reopen a done task that has no owners left, claim it with 🙋 and then set any other status. With `status_claims` on, setting the other status is enough.
 
 Messages from integrations and webhooks count as tasks too, with the integration's name as the reporter. The bot can't @-mention them, so ❓ posts their name as plain text.
 
@@ -111,6 +112,7 @@ Messages from integrations and webhooks count as tasks too, with the integration
 
 - **Different emoji:** edit the `emoji` block. Custom workspace emoji work (e.g. `claim: [itakeit]`), and each action can list several emoji. If the block is present it replaces the defaults, so list every action you want.
 - **Disabling an action:** leave it out of `emoji`. `claim` is required.
+- **Status without claiming:** `status_claims: true` lets anyone set a status. Everyone who adds a 🙋 or status reaction while the bot is running becomes an owner, and stays one until they have none left on the message. Reactions added while the bot was offline, or before the flag was on, don't count until re-added. When the bot can't read the message's reactions after a removal, it keeps the owner. Turning the flag off later leaves status-only owners in place; they hand a task back by adding and removing 🙋.
 - **Reminders:** raise or lower `stale_after_hours`. Tasks that are blocked or waiting for info are never nudged.
 - **Database cleanup:** set `done_retain_days` to delete done tasks from SQLite after that many days without activity, checked hourly. Defaults to 30. Set `-1` to keep them forever. Messages and cards stay in Slack, but a swept task is frozen: reactions on it are ignored, deleting it leaves its card, and it can't be reopened. Messages older than `done_retain_days` are also never adopted, so a message missed while the bot was offline that long is not picked up.
 

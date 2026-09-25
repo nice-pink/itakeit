@@ -25,8 +25,10 @@ type fakeAPI struct {
 	calls   []call
 	seq     int
 	history map[string]slack.Message
-	missing map[string]bool // ts that UpdateMessage reports as message_not_found
-	errs    []string        // errors the next UpdateMessage calls return, in order
+	missing map[string]bool                 // ts that UpdateMessage reports as message_not_found
+	errs    []string                        // errors the next UpdateMessage calls return, in order
+	held    map[string][]slack.ItemReaction // reactions.get result by message ts
+	heldErr error
 }
 
 func decode(opts []slack.MsgOption) (text, thread string) {
@@ -83,6 +85,10 @@ func (f *fakeAPI) GetConversationHistory(p *slack.GetConversationHistoryParamete
 func (f *fakeAPI) AddPin(c string, item slack.ItemRef) error {
 	f.calls = append(f.calls, call{kind: "pin", channel: c, ts: item.Timestamp})
 	return nil
+}
+
+func (f *fakeAPI) GetReactions(item slack.ItemRef, _ slack.GetReactionsParameters) (slack.ReactedItem, error) {
+	return slack.ReactedItem{Reactions: f.held[item.Timestamp]}, f.heldErr
 }
 
 func (f *fakeAPI) reset() { f.calls = nil }
@@ -359,7 +365,7 @@ func TestChecklist(t *testing.T) {
 	tk, _ := st.Get(ch, "100.1")
 	items := tk.Checklist()
 	blockA, blockB := "check:100.1:"+items[0].Key, "check:100.1:"+items[1].Key
-	raw, _ := json.Marshal(cardBlocks(tk, b.emoji))
+	raw, _ := json.Marshal(cardBlocks(tk, b.emoji, false))
 	if !strings.Contains(string(raw), `"type":"checkboxes"`) || !strings.Contains(string(raw), `"block_id":"`+blockB+`"`) {
 		t.Fatalf("card blocks should carry one checkbox group per item: %s", raw)
 	}
@@ -413,7 +419,7 @@ func TestCardBlockLimits(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("[ ] item %d", i))
 	}
 	tk := &task.Task{TS: "100.1", Text: strings.Join(lines, "\n")}
-	if n := len(cardBlocks(tk, nil)); n > 50 {
+	if n := len(cardBlocks(tk, nil, false)); n > 50 {
 		t.Fatalf("card has %d blocks, Block Kit allows 50", n)
 	}
 	if got := optionText(strings.Repeat("🚀", 100)); len(utf16.Encode([]rune(got))) > 75 {
@@ -436,5 +442,42 @@ func TestCardFallback(t *testing.T) {
 	b.updateCard(tk)
 	if c := f.find("update", "Checklist:* 0/1"); c == nil || c.ts != tk.CardTS || len(f.calls) != 1 {
 		t.Fatalf("rejected blocks should fall back to a text-only edit of the same card, calls: %+v", f.calls)
+	}
+}
+
+func TestStatusClaims(t *testing.T) {
+	b, f, st := setup(t)
+	b.cfg.StatusClaims = true
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "db down"}))
+	if f.find("post", "Any of these makes you an owner") == nil {
+		t.Fatalf("card should explain the rule, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(react("UALICE001", "construction", "100.1", true))
+	tk, _ := st.Get(ch, "100.1")
+	if f.find("ephemeral", "") != nil || !tk.IsOwner("UALICE001") || tk.Status != task.InProgress {
+		t.Fatalf("a status reaction should own and set the status, got %+v calls %+v", tk, f.calls)
+	}
+
+	// Switching status: the new reaction lands before the old one is removed.
+	b.Handle(react("UALICE001", "eyes", "100.1", true))
+	f.held = map[string][]slack.ItemReaction{"100.1": {{Name: "eyes", Users: []string{"UALICE001"}}, {Name: "thumbsup", Users: []string{"UBOB00001"}}}}
+	b.Handle(react("UALICE001", "construction", "100.1", false))
+	if tk, _ = st.Get(ch, "100.1"); !tk.IsOwner("UALICE001") || tk.Status != task.Investigating {
+		t.Fatalf("still holding a status keeps ownership, got %+v", tk)
+	}
+
+	f.held = map[string][]slack.ItemReaction{"100.1": {{Name: "eyes", Users: []string{"UALICE001"}}, {Name: "thumbsup", Users: []string{"UALICE001"}}}}
+	b.Handle(react("UALICE001", "eyes", "100.1", false))
+	if tk, _ = st.Get(ch, "100.1"); len(tk.Owners) != 0 || tk.Status != "" {
+		t.Fatalf("removing the last status reaction hands the task back, even if reactions.get still lists it, got %+v", tk)
+	}
+
+	b.Handle(react("UBOB00001", "eyes", "100.1", true))
+	f.heldErr = fmt.Errorf("ratelimited")
+	b.Handle(react("UBOB00001", "raising_hand", "100.1", false))
+	if tk, _ = st.Get(ch, "100.1"); !tk.IsOwner("UBOB00001") {
+		t.Fatalf("an unanswered reactions lookup keeps the owner, got %+v", tk)
 	}
 }

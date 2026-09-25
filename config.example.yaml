@@ -15,6 +15,11 @@ board_max_tasks: 50
 # many days, checked hourly. Messages and cards in Slack are kept. -1 keeps them forever.
 done_retain_days: 30
 
+# false: only owners (who reacted with claim) can set a status. true: any status
+# reaction makes the reactor an owner, who stays one until they have no claim or
+# status reaction left on the task message.
+status_claims: false
+
 # Action -> reaction names. The first emoji of each action is the one shown in
 # cards and on the board. Omit an action to disable it. If this block is present
 # it replaces the defaults entirely. Actions: claim (required), investigating,

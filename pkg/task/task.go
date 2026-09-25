@@ -80,6 +80,30 @@ func (t *Task) React(a Action, user string, added bool, now time.Time) Effect {
 	return Changed
 }
 
+// ReactOpen is React for status_claims mode, where a status reaction needs no
+// claim first: any claim or status reaction makes the reactor an owner, and they
+// stay one while they hold at least one. holding reports, for a removal, whether
+// the user still has another claim or status reaction on the message.
+func (t *Task) ReactOpen(a Action, user string, added, holding bool, now time.Time) Effect {
+	eff := NoChange
+	if added && !t.IsOwner(user) {
+		t.claim(user, true, now)
+		eff = Changed
+	}
+	if a != Claim {
+		if e := t.React(a, user, added, now); e != NoChange {
+			eff = e
+		}
+	}
+	if !added && !holding && t.IsOwner(user) {
+		t.claim(user, false, now)
+		if eff == NoChange {
+			eff = Changed
+		}
+	}
+	return eff
+}
+
 func (t *Task) claim(user string, added bool, now time.Time) Effect {
 	switch {
 	case added && !t.IsOwner(user):

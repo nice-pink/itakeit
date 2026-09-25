@@ -27,8 +27,9 @@ func (t Task) Label(emoji map[Action]string) string {
 	}
 }
 
-// Card is the status message the bot keeps in each task's thread.
-func Card(t Task, emoji map[Action]string) string {
+// Card is the status message the bot keeps in each task's thread. statusClaims
+// is config status_claims: a status reaction makes the reactor an owner.
+func Card(t Task, emoji map[Action]string, statusClaims bool) string {
 	owners := "nobody yet"
 	if len(t.Owners) > 0 {
 		owners = Mentions(t.Owners)
@@ -43,8 +44,12 @@ func Card(t Task, emoji map[Action]string) string {
 	if done, total := t.Progress(); total > 0 {
 		checklist = fmt.Sprintf("*Checklist:* %d/%d\n", done, total)
 	}
-	return fmt.Sprintf("*Status:* %s\n*Owners:* %s\n%s_React on the message above: %s. Status reactions count from owners only._",
-		t.Label(emoji), owners, checklist, strings.Join(legend, " · "))
+	rule := "Status reactions count from owners only."
+	if statusClaims {
+		rule = "Any of these makes you an owner."
+	}
+	return fmt.Sprintf("*Status:* %s\n*Owners:* %s\n%s_React on the message above: %s. %s_",
+		t.Label(emoji), owners, checklist, strings.Join(legend, " · "), rule)
 }
 
 // Board is the pinned overview of all open tasks, oldest first.

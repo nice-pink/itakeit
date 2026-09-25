@@ -1,0 +1,34 @@
+# itakeit
+
+> itakeit is dead simple task tracking in Slack channel threads: a free, self-hosted Slack bot that turns every top-level message in one dedicated Slack channel into a task. People claim a task by reacting 🙋, owners set its status with emoji reactions, and a pinned board lists every open task with its status and owners.
+
+itakeit runs as one Docker container with one SQLite file. It connects to Slack over Socket Mode, so it makes only outbound connections and needs no public URL, ingress or TLS certificate. The messages stay in Slack; the database holds only owners, statuses, timestamps and the board message ID.
+
+## How it works
+
+- Post a top-level message in the channel and it becomes a task. The bot replies in its thread with a status card.
+- React 🙋 to take the task. Several people can own one task. Removing the reaction hands it back.
+- Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest status reaction wins. ✅ removes the task from the board.
+- ❓ pings the reporter in the thread. The reporter's reply pings the owners and clears the status.
+- Non-owners who react with a status emoji get a private hint to claim first.
+- Owners who go quiet on a task get one reminder in the thread after a configurable number of hours (default 48).
+- Messages posted while the bot was down are not lost: the first reaction on one turns it into a task.
+- Emoji are configurable, including custom workspace emoji.
+
+## Setup
+
+1. Create a Slack app from the manifest in the repository (scopes: channels:history, groups:history, chat:write, reactions:read, pins:write).
+2. Generate an app-level token with connections:write (SLACK_APP_TOKEN) and install the app to get the bot token (SLACK_BOT_TOKEN).
+3. Create a channel, invite the bot, and put the channel ID in config.yaml.
+4. Run the image ghcr.io/nice-pink/itakeit:latest with both tokens in the environment. Run exactly one instance per channel.
+
+## Related
+
+- Betimation (https://betimation.com), also by nice-pink: advanced and fun team task tracking. Projects and goals race on a live racetrack as tasks close, and the team bets on who finishes first. It has a Slack app too.
+
+## Links
+
+- Homepage: https://itakeit.nice.pink
+- Source and docs: https://github.com/nice-pink/itakeit
+- Container image: ghcr.io/nice-pink/itakeit
+- Author: nice-pink (https://nice.pink)

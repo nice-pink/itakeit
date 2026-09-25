@@ -2,7 +2,9 @@
 
 # I take it
 
-A Slack bot that turns every message in one dedicated channel into a task people can claim with an emoji.
+Task tracking in Slack threads. Dead simple.
+
+A self-hosted Slack bot that turns every message in one dedicated channel into a task. People claim it and set its status with reactions. Homepage: [itakeit.nice.pink](https://itakeit.nice.pink).
 
 - Post an issue in the channel and it becomes a task. The bot replies in its thread with a status card.
 - React 🙋 (`:raising_hand:`) on the issue to take it. Several people can own one task. Remove the reaction to hand it back.
@@ -56,6 +58,16 @@ Set `channel` to the ID from step 2. Every other field has a default, and all fi
 The log should show `authenticated` and then `connected to slack`, and a board message appears pinned in the channel. `-debug` logs the raw Socket Mode traffic.
 
 ### 5. Run in Docker
+
+Pull the published image from GitHub Container Registry:
+
+```
+docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data ghcr.io/nice-pink/itakeit:latest
+```
+
+`latest` follows `main`. Release tags `vX.Y.Z` also publish `X.Y.Z` and `X.Y`, and every build publishes `sha-<short>`. Images are built for linux/amd64 and linux/arm64.
+
+Or build it yourself:
 
 ```
 docker build -t itakeit . && docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data itakeit

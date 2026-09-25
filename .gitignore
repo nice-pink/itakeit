@@ -10,3 +10,5 @@ cover.out
 .claude/
 CLAUDE.local.md
 events.jsonl
+.playwright-mcp/
+.vscode

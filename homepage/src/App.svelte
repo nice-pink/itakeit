@@ -42,15 +42,6 @@ volumes:
     ['owner', 'replies in the thread', 'counts as activity and resets the reminder clock'],
     ['non-owner', 'reacts with a status emoji', 'ignored, with a private hint to claim first'],
   ]
-
-  const faq = [
-    { q: 'Why do I create my own Slack app instead of installing one?', a: 'itakeit is self-hosted. Your app, your tokens and your container stay in your workspace and on your infrastructure. The manifest makes creating the app a two-minute copy and paste.' },
-    { q: 'Does it need a public URL?', a: 'No. It connects to Slack over Socket Mode, so it only makes outbound connections. No ingress, no TLS certificate, no open port.' },
-    { q: 'What does it store?', a: 'Only owners, statuses, timestamps and the board message ID, in a SQLite file. The messages themselves stay in Slack. Losing the database loses claims and statuses, never conversation.' },
-    { q: 'Can I run two instances for redundancy?', a: 'No. Run exactly one instance per channel. Two would both answer every event and post duplicate cards.' },
-    { q: 'What about messages posted while the bot was down?', a: 'They are not lost. The first 🙋 or status reaction on such a message turns it into a task.' },
-    { q: 'Can I use my own emoji?', a: 'Yes. The emoji block in config.yaml maps each action to one or more emoji, including custom workspace emoji. Leave an action out to disable it. Claim is required.' },
-  ]
 </script>
 
 <header class="nav">
@@ -69,8 +60,8 @@ volumes:
   <section class="hero wrap">
     <div class="pitch">
       <img class="turtle" src="./turtle.png" alt="itakeit pixel turtle" width="400" height="259" />
-      <h1>Claim Slack issues <span>with an emoji.</span></h1>
-      <p class="lead">itakeit turns every message in one Slack channel into a task. People take it with 🙋, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
+      <h1>Task tracking in Slack threads. <span>Dead simple.</span></h1>
+      <p class="lead"><b>itakeit</b> turns every message in one Slack channel into a task. People take it with 🙋, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
       <div class="cta">
         <a class="btn" href="#setup">Set it up</a>
         <a class="btn ghost" href={repo}>View on GitHub</a>
@@ -163,22 +154,13 @@ volumes:
       </div>
     </div>
   </section>
-
-  <section class="wrap faq">
-    <h2>Questions</h2>
-    {#each faq as f (f.q)}
-      <details>
-        <summary>{f.q}</summary>
-        <p>{f.a}</p>
-      </details>
-    {/each}
-  </section>
 </main>
 
 <footer>
   <div class="wrap row">
     <span><img src="./turtle.png" alt="" /> itakeit</span>
-    <a href={repo}>github.com/nice-pink/itakeit</a>
+    <div>Need more? <a href="https://betimation.com">Betimation</a> is advanced and fun team task tracking.</div>
+    <div>built by <a href="https://nice.pink">nice-pink</a></div>
   </div>
 </footer>
 
@@ -191,7 +173,7 @@ volumes:
   .nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border-bottom: 2px solid var(--ink); }
   .nav .row { min-height: 60px; }
   .brand { display: flex; align-items: center; gap: 0.5rem; font: 700 1.15rem var(--mono); color: var(--ink); text-decoration: none; }
-  .brand img, footer img { width: 34px; height: 34px; vertical-align: middle; }
+  .brand img, footer img { width: auto; height: 34px; image-rendering: pixelated; vertical-align: middle; }
   nav { display: flex; gap: 1.1rem; flex-wrap: wrap; }
   nav a { color: var(--ink); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
   nav a:hover { color: var(--green); }
@@ -238,11 +220,6 @@ volumes:
   td:first-child { font-family: var(--mono); font-size: 0.85rem; white-space: nowrap; color: var(--green-dark); }
   tr:last-child td { border-bottom: 0; }
 
-  .faq { padding-top: 4rem; padding-bottom: 4rem; max-width: 820px; }
-  .faq h2 { margin-bottom: 1.2rem; }
-  .faq details { background: var(--panel); border: 2px solid var(--ink); padding: 0.8rem 1rem; margin: 0 0 0.8rem; }
-  .faq summary { color: var(--ink); }
-  .faq details p { margin: 0.6rem 0 0; color: var(--muted); }
 
   footer { border-top: 2px solid var(--ink); padding: 1.2rem 0; font-size: 0.9rem; }
   footer span { font: 700 1rem var(--mono); }

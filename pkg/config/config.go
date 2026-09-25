@@ -17,6 +17,7 @@ type Config struct {
 	DBPath          string                   `yaml:"db_path"`
 	StaleAfterHours int                      `yaml:"stale_after_hours"`
 	BoardMaxTasks   int                      `yaml:"board_max_tasks"`
+	DoneRetainDays  int                      `yaml:"done_retain_days"`
 	Emoji           map[task.Action][]string `yaml:"emoji"`
 
 	byEmoji map[string]task.Action
@@ -69,8 +70,8 @@ func (c *Config) index() error {
 	if c.Channel == "" {
 		return errors.New("config: channel is required (a channel ID like C0123456789)")
 	}
-	if c.StaleAfterHours < 0 || c.BoardMaxTasks < 0 {
-		return errors.New("config: stale_after_hours and board_max_tasks must be positive")
+	if c.StaleAfterHours < 0 || c.BoardMaxTasks < 0 || c.DoneRetainDays < 0 {
+		return errors.New("config: stale_after_hours, board_max_tasks and done_retain_days must not be negative")
 	}
 	if len(c.Emoji[task.Claim]) == 0 {
 		return errors.New("config: emoji.claim needs at least one emoji")
@@ -112,4 +113,9 @@ func (c *Config) Display() map[task.Action]string {
 
 func (c *Config) StaleAfter() time.Duration {
 	return time.Duration(c.StaleAfterHours) * time.Hour
+}
+
+// DoneRetain is how long a done task stays in the database. Zero keeps them forever.
+func (c *Config) DoneRetain() time.Duration {
+	return time.Duration(c.DoneRetainDays) * 24 * time.Hour
 }

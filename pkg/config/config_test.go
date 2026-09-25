@@ -46,6 +46,7 @@ func TestInvalid(t *testing.T) {
 		"no claim":        "channel: C1\nemoji:\n  done: [a]",
 		"duplicate emoji": "channel: C1\nemoji:\n  claim: [a]\n  done: [a]",
 		"bad yaml":        "channel: [",
+		"negative retain": "channel: C1\ndone_retain_days: -1",
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {

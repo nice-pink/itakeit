@@ -277,3 +277,53 @@ func TestTombstoneDeletesTask(t *testing.T) {
 		t.Fatalf("card deleted and board emptied expected, calls: %+v", f.calls)
 	}
 }
+
+func TestSweepDone(t *testing.T) {
+	b, f, st := setup(t)
+	b.cfg.DoneRetainDays = 7
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "old"}))
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.2", Text: "open"}))
+	b.Handle(react("UALICE001", "raising_hand", "100.1", true))
+	b.Handle(react("UALICE001", "white_check_mark", "100.1", true))
+	start := b.now()
+
+	b.now = func() time.Time { return start.Add(6 * 24 * time.Hour) }
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.3", Text: "recent"}))
+	b.Handle(react("UALICE001", "raising_hand", "100.3", true))
+	b.Handle(react("UALICE001", "white_check_mark", "100.3", true))
+	b.sweepDone()
+	if tk, _ := st.Get(ch, "100.1"); tk == nil {
+		t.Fatal("done task inside the retention window was swept")
+	}
+
+	b.now = func() time.Time { return start.Add(8 * 24 * time.Hour) }
+	b.sweepDone()
+	if tk, _ := st.Get(ch, "100.1"); tk != nil {
+		t.Fatal("done task past retention should be swept")
+	}
+	for _, ts := range []string{"100.2", "100.3"} {
+		if tk, _ := st.Get(ch, ts); tk == nil {
+			t.Fatalf("%s: open or recently done task must survive", ts)
+		}
+	}
+	f.history["100.1"] = slack.Message{Msg: slack.Msg{User: "UREPORT01", Timestamp: "100.1", Text: "old"}}
+	f.reset()
+	b.Handle(react("UBOB00001", "white_check_mark", "100.1", true))
+	b.Handle(react("UBOB00001", "raising_hand", "100.1", true))
+	if tk, _ := st.Get(ch, "100.1"); tk != nil || len(f.calls) != 0 {
+		t.Fatalf("a swept task must not be adopted again, calls: %+v", f.calls)
+	}
+	recent := fmt.Sprintf("%d.000100", b.now().Add(-24*time.Hour).Unix())
+	f.history[recent] = slack.Message{Msg: slack.Msg{User: "UREPORT01", Timestamp: recent, Text: "missed"}}
+	b.Handle(react("UBOB00001", "raising_hand", recent, true))
+	if tk, _ := st.Get(ch, recent); tk == nil {
+		t.Fatal("a message inside the retention window must still be adopted")
+	}
+
+	b.cfg.DoneRetainDays = 0
+	b.now = func() time.Time { return start.Add(365 * 24 * time.Hour) }
+	b.sweepDone()
+	if tk, _ := st.Get(ch, "100.3"); tk == nil {
+		t.Fatal("done_retain_days 0 must keep done tasks")
+	}
+}

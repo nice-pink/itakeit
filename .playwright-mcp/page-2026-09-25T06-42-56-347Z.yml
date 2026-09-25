@@ -1,0 +1,233 @@
+- generic [ref=f2e2]:
+  - banner [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - link "itakeit" [ref=f2e5] [cursor=pointer]:
+        - /url: "#top"
+      - navigation [ref=f2e6]:
+        - link "Setup" [ref=f2e7] [cursor=pointer]:
+          - /url: "#setup"
+        - link "GitHub" [ref=f2e8] [cursor=pointer]:
+          - /url: https://github.com/nice-pink/itakeit
+  - main [ref=f2e9]:
+    - generic [ref=f2e10]:
+      - generic [ref=f2e11]:
+        - img "itakeit pixel turtle" [ref=f2e12]
+        - heading "Claim Slack issues with an emoji." [level=1] [ref=f2e13]:
+          - text: Claim Slack issues
+          - generic [ref=f2e14]: with an emoji.
+        - paragraph [ref=f2e15]: itakeit turns every message in one Slack channel into a task. People take it with 🙋, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.
+        - generic [ref=f2e16]:
+          - link "Set it up" [ref=f2e17] [cursor=pointer]:
+            - /url: "#setup"
+          - link "View on GitHub" [ref=f2e18] [cursor=pointer]:
+            - /url: https://github.com/nice-pink/itakeit
+        - paragraph [ref=f2e19]: Self-hosted. One Docker container, one SQLite file, no public URL.
+      - generic [ref=f2e20]:
+        - generic "Interactive example of a task in Slack" [ref=f2e21]:
+          - generic [ref=f2e22]:
+            - generic [ref=f2e23]: "# itakeit"
+            - button "reset" [ref=f2e24] [cursor=pointer]
+          - generic [ref=f2e25]:
+            - generic [ref=f2e26]: M
+            - generic [ref=f2e27]:
+              - generic [ref=f2e28]: Maya 10:42
+              - paragraph [ref=f2e29]: Checkout returns 500 for EU cards since this morning's deploy.
+              - generic [ref=f2e30]:
+                - button "🙋 0" [ref=f2e31] [cursor=pointer]
+                - button "👀 0" [ref=f2e32] [cursor=pointer]
+                - button "🚧 0" [ref=f2e33] [cursor=pointer]
+                - button "❓ 0" [ref=f2e34] [cursor=pointer]
+                - button "⛔ 0" [ref=f2e35] [cursor=pointer]
+                - button "✅ 0" [ref=f2e36] [cursor=pointer]
+              - generic [ref=f2e40]:
+                - generic [ref=f2e41]: itakeit APP
+                - paragraph [ref=f2e42]: "Status: ⚪ unclaimedOwners: nobody yet"
+                - paragraph [ref=f2e43]: "React on the message above: 🙋 take it · 👀 investigating · 🚧 in progress · ❓ needs info · ⛔ blocked · ✅ done"
+          - generic [ref=f2e44]:
+            - generic [ref=f2e45]: 📌 Pinned board
+            - paragraph [ref=f2e46]: "I take it: 1 open• ⚪ unclaimed Checkout returns 500 for EU cards… · unclaimed"
+        - paragraph [ref=f2e47]: "Try it: click the reactions."
+    - generic [ref=f2e49]:
+      - heading "How it works" [level=2] [ref=f2e50]
+      - paragraph [ref=f2e51]: One dedicated channel. No forms, no extra tool, no context switch.
+      - generic [ref=f2e52]:
+        - article [ref=f2e53]:
+          - generic [ref=f2e54]: 📝
+          - heading "Every message is a task" [level=3] [ref=f2e55]
+          - paragraph [ref=f2e56]: Post an issue in the channel. The bot replies in its thread with a status card.
+        - article [ref=f2e57]:
+          - generic [ref=f2e58]: 🙋
+          - heading "Claim with one reaction" [level=3] [ref=f2e59]
+          - paragraph [ref=f2e60]: React 🙋 to take it. Several people can own a task. Remove the reaction to hand it back.
+        - article [ref=f2e61]:
+          - generic [ref=f2e62]: 🚧
+          - heading "Status by emoji" [level=3] [ref=f2e63]
+          - paragraph [ref=f2e64]: Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.
+        - article [ref=f2e65]:
+          - generic [ref=f2e66]: ❓
+          - heading "Ask the reporter" [level=3] [ref=f2e67]
+          - paragraph [ref=f2e68]: ❓ pings the reporter in the thread. Their reply pings the owners and clears the status.
+        - article [ref=f2e69]:
+          - generic [ref=f2e70]: 📌
+          - heading "A pinned board" [level=3] [ref=f2e71]
+          - paragraph [ref=f2e72]: One pinned message lists every open task with its status and owners, always current.
+        - article [ref=f2e73]:
+          - generic [ref=f2e74]: ⏰
+          - heading "Nudges for stale work" [level=3] [ref=f2e75]
+          - paragraph [ref=f2e76]: Owners who go quiet on a task get a reminder in the thread after a configurable number of hours.
+    - generic [ref=f2e77]:
+      - heading "Setup" [level=2] [ref=f2e78]
+      - paragraph [ref=f2e79]: About ten minutes. You need a Slack workspace where you can create apps and a machine that runs Docker.
+      - list [ref=f2e80]:
+        - listitem [ref=f2e81]:
+          - heading "Create the Slack app" [level=3] [ref=f2e82]
+          - paragraph [ref=f2e83]:
+            - text: Open
+            - link "api.slack.com/apps" [ref=f2e84] [cursor=pointer]:
+              - /url: https://api.slack.com/apps
+            - text: ", choose Create New App, then From an app manifest, pick your workspace and paste this manifest into the YAML tab."
+          - group [ref=f2e85]:
+            - generic "Show slack-app-manifest.yaml" [ref=f2e86] [cursor=pointer]
+          - paragraph [ref=f2e87]:
+            - text: It requests only
+            - code [ref=f2e88]: channels:history
+            - text: ","
+            - code [ref=f2e89]: groups:history
+            - text: ","
+            - code [ref=f2e90]: chat:write
+            - text: ","
+            - code [ref=f2e91]: reactions:read
+            - text: and
+            - code [ref=f2e92]: pins:write
+            - text: .
+        - listitem [ref=f2e93]:
+          - heading "Get the two tokens" [level=3] [ref=f2e94]
+          - paragraph [ref=f2e95]:
+            - text: Under Basic Information → App-Level Tokens, generate a token with the scope
+            - code [ref=f2e96]: connections:write
+            - text: . That
+            - code [ref=f2e97]: xapp-…
+            - text: token is
+            - code [ref=f2e98]: SLACK_APP_TOKEN
+            - text: .
+          - paragraph [ref=f2e99]:
+            - text: Under Install App, install the app to your workspace and copy the Bot User OAuth Token. That
+            - code [ref=f2e100]: xoxb-…
+            - text: token is
+            - code [ref=f2e101]: SLACK_BOT_TOKEN
+            - text: .
+        - listitem [ref=f2e102]:
+          - heading "Prepare the channel" [level=3] [ref=f2e103]
+          - paragraph [ref=f2e104]:
+            - text: Create a channel such as
+            - code [ref=f2e105]: "#itakeit"
+            - text: (public or private), invite the bot with
+            - code [ref=f2e106]: /invite @itakeit
+            - text: ", and copy the channel ID from channel name → About. It looks like"
+            - code [ref=f2e107]: C0123456789
+            - text: .
+        - listitem [ref=f2e108]:
+          - heading "Write config.yaml" [level=3] [ref=f2e109]
+          - paragraph [ref=f2e110]:
+            - text: Two lines are enough. Every other setting has a default. Emoji, reminder interval and board size are documented in
+            - link "config.example.yaml" [ref=f2e111] [cursor=pointer]:
+              - /url: https://github.com/nice-pink/itakeit/blob/main/config.example.yaml
+            - text: .
+          - generic [ref=f2e112]:
+            - generic [ref=f2e113]:
+              - generic [ref=f2e114]: config.yaml
+              - button "Copy" [ref=f2e115] [cursor=pointer]
+            - code [ref=f2e117]: "channel: C0123456789 db_path: /data/itakeit.db"
+        - listitem [ref=f2e118]:
+          - heading "Run the container" [level=3] [ref=f2e119]
+          - paragraph [ref=f2e120]:
+            - text: Export both tokens in your shell, then start the container from the directory that holds
+            - code [ref=f2e121]: config.yaml
+            - text: .
+          - generic [ref=f2e122]:
+            - generic [ref=f2e123]:
+              - generic [ref=f2e124]: shell
+              - button "Copy" [ref=f2e125] [cursor=pointer]
+            - code [ref=f2e127]: export SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-...
+          - generic [ref=f2e128]:
+            - generic [ref=f2e129]:
+              - generic [ref=f2e130]: shell
+              - button "Copy" [ref=f2e131] [cursor=pointer]
+            - code [ref=f2e133]: docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data nicepink/itakeit:latest
+          - group [ref=f2e134]:
+            - generic "Prefer Docker Compose?" [ref=f2e135] [cursor=pointer]
+          - paragraph [ref=f2e136]:
+            - text: The log shows
+            - code [ref=f2e137]: authenticated
+            - text: and
+            - code [ref=f2e138]: connected to slack
+            - text: ", and a board appears pinned in the channel. Post a message and react 🙋."
+      - generic [ref=f2e139]:
+        - text: Run exactly one instance per channel. The container makes only outbound connections and needs no port. State lives in the
+        - code [ref=f2e140]: itakeit-data
+        - text: volume, so it survives restarts and upgrades.
+    - generic [ref=f2e142]:
+      - heading "Usage" [level=2] [ref=f2e143]
+      - paragraph [ref=f2e144]: Reactions count only on the task message itself. Skin tone variants count as the base emoji.
+      - table [ref=f2e146]:
+        - rowgroup [ref=f2e147]:
+          - row [ref=f2e148]:
+            - columnheader "Who" [ref=f2e149]
+            - columnheader "Does" [ref=f2e150]
+            - columnheader "Effect" [ref=f2e151]
+        - rowgroup [ref=f2e152]:
+          - row [ref=f2e153]:
+            - cell "anyone" [ref=f2e154]
+            - cell "posts a top-level message" [ref=f2e155]
+            - cell "new task, status card in its thread, board updated" [ref=f2e156]
+          - row [ref=f2e157]:
+            - cell "anyone" [ref=f2e158]
+            - cell "reacts 🙋 on the task" [ref=f2e159]
+            - cell "becomes an owner" [ref=f2e160]
+          - row [ref=f2e161]:
+            - cell "owner" [ref=f2e162]
+            - cell "removes 🙋" [ref=f2e163]
+            - cell "stops owning it. When the last owner leaves, the task is unclaimed again, unless it is done." [ref=f2e164]
+          - row [ref=f2e165]:
+            - cell "owner" [ref=f2e166]
+            - cell "reacts 👀 / 🚧 / ⛔ / ✅" [ref=f2e167]
+            - cell "sets the status. ✅ removes the task from the board." [ref=f2e168]
+          - row [ref=f2e169]:
+            - cell "owner" [ref=f2e170]
+            - cell "removes the current status reaction" [ref=f2e171]
+            - cell "status falls back to claimed" [ref=f2e172]
+          - row [ref=f2e173]:
+            - cell "owner" [ref=f2e174]
+            - cell "reacts ❓" [ref=f2e175]
+            - cell "reporter is pinged in the thread" [ref=f2e176]
+          - row [ref=f2e177]:
+            - cell "reporter" [ref=f2e178]
+            - cell "replies while ❓ is set" [ref=f2e179]
+            - cell "owners are pinged, status falls back to claimed" [ref=f2e180]
+          - row [ref=f2e181]:
+            - cell "owner" [ref=f2e182]
+            - cell "replies in the thread" [ref=f2e183]
+            - cell "counts as activity and resets the reminder clock" [ref=f2e184]
+          - row [ref=f2e185]:
+            - cell "non-owner" [ref=f2e186]
+            - cell "reacts with a status emoji" [ref=f2e187]
+            - cell "ignored, with a private hint to claim first" [ref=f2e188]
+    - generic [ref=f2e189]:
+      - heading "Questions" [level=2] [ref=f2e190]
+      - group [ref=f2e191]:
+        - generic "Why do I create my own Slack app instead of installing one?" [ref=f2e192] [cursor=pointer]
+      - group [ref=f2e193]:
+        - generic "Does it need a public URL?" [ref=f2e194] [cursor=pointer]
+      - group [ref=f2e195]:
+        - generic "What does it store?" [ref=f2e196] [cursor=pointer]
+      - group [ref=f2e197]:
+        - generic "Can I run two instances for redundancy?" [ref=f2e198] [cursor=pointer]
+      - group [ref=f2e199]:
+        - generic "What about messages posted while the bot was down?" [ref=f2e200] [cursor=pointer]
+      - group [ref=f2e201]:
+        - generic "Can I use my own emoji?" [ref=f2e202] [cursor=pointer]
+  - contentinfo [ref=f2e203]:
+    - generic [ref=f2e204]:
+      - generic [ref=f2e205]: itakeit
+      - link "github.com/nice-pink/itakeit" [ref=f2e206] [cursor=pointer]:
+        - /url: https://github.com/nice-pink/itakeit

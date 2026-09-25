@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/nice-pink/itakeit/pkg/config"
@@ -54,6 +55,13 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 	b.refreshBoard()
 	tick := time.NewTicker(staleInterval(b.cfg.StaleAfter()))
 	defer tick.Stop()
+	var sweep <-chan time.Time // nil, never fires, when cleanup is off
+	if b.cfg.DoneRetain() > 0 {
+		b.sweepDone()
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		sweep = t.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -62,6 +70,8 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 			return err
 		case <-tick.C:
 			b.remindStale()
+		case <-sweep:
+			b.sweepDone()
 		case e := <-events:
 			b.Handle(e)
 		}
@@ -245,7 +255,15 @@ func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added boo
 
 // adopt turns a top-level message that predates the bot (or was missed while it
 // was offline) into a task when someone reacts to it.
+//
+// Messages older than done_retain_days are never adopted: every swept task is
+// that old, and adopting one would reopen finished work under a second card.
 func (b *Bot) adopt(ts string) *task.Task {
+	if r := b.cfg.DoneRetain(); r > 0 {
+		if sec, err := strconv.ParseFloat(ts, 64); err == nil && b.now().Sub(time.Unix(int64(sec), 0)) >= r {
+			return nil
+		}
+	}
 	h, err := b.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
 		ChannelID: b.cfg.Channel, Latest: ts, Oldest: ts, Inclusive: true, Limit: 1})
 	if err != nil {
@@ -283,6 +301,23 @@ func (b *Bot) remindStale() {
 			task.Mentions(t.Owners), hours(now.Sub(t.LastActivity)), b.emoji[task.Claim]))
 		t.RemindedAt = now
 		b.save(t)
+	}
+}
+
+// sweepDone deletes done tasks idle for longer than done_retain_days. Only the
+// database row goes: the message and card stay in Slack, and the task is frozen
+// because adopt refuses messages that old.
+func (b *Bot) sweepDone() {
+	if b.cfg.DoneRetain() <= 0 {
+		return
+	}
+	n, err := b.store.DeleteDone(b.cfg.Channel, b.now().Add(-b.cfg.DoneRetain()))
+	if err != nil {
+		slog.Error("sweep done", "err", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("swept done tasks", "count", n)
 	}
 }
 

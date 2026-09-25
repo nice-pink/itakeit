@@ -86,6 +86,17 @@ func (s *Store) Delete(channel, ts string) error {
 	return err
 }
 
+// DeleteDone removes a channel's done tasks whose last activity is before cutoff
+// and returns how many went. Owners cascade.
+func (s *Store) DeleteDone(channel string, cutoff time.Time) (int64, error) {
+	r, err := s.db.Exec(`DELETE FROM tasks WHERE channel = ? AND status = ? AND last_activity < ?`,
+		channel, string(task.Done), cutoff.Unix())
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
 // KV returns "" when the key is unset.
 func (s *Store) KV(key string) (string, error) {
 	var v string

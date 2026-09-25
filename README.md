@@ -94,6 +94,7 @@ Messages from integrations and webhooks count as tasks too, with the integration
 - **Different emoji:** edit the `emoji` block. Custom workspace emoji work (e.g. `claim: [itakeit]`), and each action can list several emoji. If the block is present it replaces the defaults, so list every action you want.
 - **Disabling an action:** leave it out of `emoji`. `claim` is required.
 - **Reminders:** raise or lower `stale_after_hours`. Tasks that are blocked or waiting for info are never nudged.
+- **Database cleanup:** set `done_retain_days` to delete done tasks from SQLite after that many days without activity, checked hourly. Off (`0`) by default. Messages and cards stay in Slack, but a swept task is frozen: reactions on it are ignored, deleting it leaves its card, and it can't be reopened. Messages older than `done_retain_days` are also never adopted, so a message missed while the bot was offline that long is not picked up.
 
 ## How it works
 

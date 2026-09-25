@@ -90,7 +90,7 @@ func (f *fakeAPI) find(kind, contains string) *call {
 
 func setup(t *testing.T) (*Bot, *fakeAPI, *store.Store) {
 	t.Helper()
-	cfg, err := config.Parse([]byte("channel: " + ch + "\nstale_after_hours: 24\ndone_retain_days: 0"))
+	cfg, err := config.Parse([]byte("channel: " + ch + "\nstale_after_hours: 24\ndone_retain_days: -1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,10 +320,10 @@ func TestSweepDone(t *testing.T) {
 		t.Fatal("a message inside the retention window must still be adopted")
 	}
 
-	b.cfg.DoneRetainDays = 0
+	b.cfg.DoneRetainDays = -1
 	b.now = func() time.Time { return start.Add(365 * 24 * time.Hour) }
 	b.sweepDone()
 	if tk, _ := st.Get(ch, "100.3"); tk == nil {
-		t.Fatal("done_retain_days 0 must keep done tasks")
+		t.Fatal("done_retain_days -1 must keep done tasks")
 	}
 }

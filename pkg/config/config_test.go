@@ -24,9 +24,9 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestDoneRetainOff(t *testing.T) {
-	c, err := Parse([]byte("channel: C1\ndone_retain_days: 0"))
+	c, err := Parse([]byte("channel: C1\ndone_retain_days: -1"))
 	if err != nil || c.DoneRetain() != 0 {
-		t.Fatalf("explicit 0 must disable cleanup, got %v %v", c, err)
+		t.Fatalf("-1 must disable cleanup, got %v %v", c, err)
 	}
 }
 
@@ -53,7 +53,7 @@ func TestInvalid(t *testing.T) {
 		"no claim":        "channel: C1\nemoji:\n  done: [a]",
 		"duplicate emoji": "channel: C1\nemoji:\n  claim: [a]\n  done: [a]",
 		"bad yaml":        "channel: [",
-		"negative retain": "channel: C1\ndone_retain_days: -1",
+		"negative retain": "channel: C1\ndone_retain_days: -2",
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {

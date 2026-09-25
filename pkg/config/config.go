@@ -61,12 +61,7 @@ func Parse(raw []byte) (*Config, error) {
 	if c.BoardMaxTasks == 0 {
 		c.BoardMaxTasks = Defaults.BoardMaxTasks
 	}
-	// 0 is a valid value (keep forever), so only an absent key gets the default.
-	var set struct {
-		DoneRetainDays *int `yaml:"done_retain_days"`
-	}
-	yaml.Unmarshal(raw, &set)
-	if set.DoneRetainDays == nil {
+	if c.DoneRetainDays == 0 {
 		c.DoneRetainDays = Defaults.DoneRetainDays
 	}
 	if len(c.Emoji) == 0 {
@@ -79,8 +74,11 @@ func (c *Config) index() error {
 	if c.Channel == "" {
 		return errors.New("config: channel is required (a channel ID like C0123456789)")
 	}
-	if c.StaleAfterHours < 0 || c.BoardMaxTasks < 0 || c.DoneRetainDays < 0 {
-		return errors.New("config: stale_after_hours, board_max_tasks and done_retain_days must not be negative")
+	if c.StaleAfterHours < 0 || c.BoardMaxTasks < 0 {
+		return errors.New("config: stale_after_hours and board_max_tasks must be positive")
+	}
+	if c.DoneRetainDays < -1 {
+		return errors.New("config: done_retain_days must be positive, or -1 to keep done tasks forever")
 	}
 	if len(c.Emoji[task.Claim]) == 0 {
 		return errors.New("config: emoji.claim needs at least one emoji")
@@ -124,7 +122,8 @@ func (c *Config) StaleAfter() time.Duration {
 	return time.Duration(c.StaleAfterHours) * time.Hour
 }
 
-// DoneRetain is how long a done task stays in the database. Zero keeps them forever.
+// DoneRetain is how long a done task stays in the database. Zero means forever
+// (done_retain_days: -1).
 func (c *Config) DoneRetain() time.Duration {
-	return time.Duration(c.DoneRetainDays) * 24 * time.Hour
+	return time.Duration(max(c.DoneRetainDays, 0)) * 24 * time.Hour
 }

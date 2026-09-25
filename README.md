@@ -130,7 +130,7 @@ pkg/store       SQLite persistence
 - A separate goroutine acknowledges each event the moment it arrives, so a slow Slack API call never delays an ack. Events still queued when the bot stops or crashes are not redelivered. Re-adding the reaction repairs it. A redelivered message never resets a task that already exists.
 - Slack API calls time out after 15 s and are retried up to 3 times on rate limits.
 - The board is posted as a placeholder and filled by an edit, because edits don't notify anyone, and reposting the board would otherwise ping every owner.
-- The channel is the record of what was said. SQLite holds only owners, statuses, timestamps and the board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board, and tasks come back as people react.
+- The channel is the record of what was said. SQLite holds only owners, statuses, timestamps, checklist ticks and the board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board, and tasks come back as people react.
 - If someone deletes the board or a status card, the bot posts and pins a new one on the next change.
 
 ## Development

@@ -72,7 +72,7 @@
           <div class="body">
             <div class="meta"><b>itakeit</b> <span class="app">APP</span></div>
             <p aria-live="polite"><b>Status:</b> {label}<br /><b>Owners:</b> {claimed ? '@you' : 'nobody yet'}</p>
-            <p class="legend">React on the message above: 🙋 take it · 👀 investigating · 🚧 in progress · ❓ needs info · ⛔ blocked · ✅ done</p>
+            <p class="legend">React on the message above: 🙋 take it · 👀 investigating · 🚧 in progress · ❓ needs info · ⛔ blocked · ✅ done. Status reactions count from owners only.</p>
           </div>
         </div>
         {#if status === 'needs_info'}
@@ -93,7 +93,7 @@
     {#if status === 'done'}
       <p>I take it: 0 open. Nothing open. 🎉</p>
     {:else}
-      <p><b>I take it: 1 open</b><br />• {label} &nbsp;Checkout returns 500 for EU cards… · {claimed ? '@you' : 'unclaimed'}</p>
+      <p><b>I take it: 1 open</b><br />{label.replace(' ', ' 1 ')}<br />• {label} &nbsp;Checkout returns 500 for EU cards… · {claimed ? '@you' : 'unclaimed'}</p>
     {/if}
   </div>
 </div>

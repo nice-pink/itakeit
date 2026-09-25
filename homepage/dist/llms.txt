@@ -1,8 +1,8 @@
 # itakeit
 
-> itakeit is dead simple task tracking in Slack channel threads: a free, self-hosted Slack bot that turns every top-level message in one dedicated Slack channel into a task. People claim a task by reacting 🙋, owners set its status with emoji reactions, and a pinned board lists every open task with its status and owners.
+> itakeit is dead simple task tracking in Slack channel threads: a free, self-hosted Slack bot that turns every top-level message in one dedicated Slack channel into a task. People claim a task by reacting 🙋, owners set its status with emoji reactions, and a pinned board counts the open tasks in each status and lists the oldest ones with their owners.
 
-itakeit runs as one Docker container with one SQLite file. It connects to Slack over Socket Mode, so it makes only outbound connections and needs no public URL, ingress or TLS certificate. The messages stay in Slack; the database holds only owners, statuses, timestamps and the board message ID.
+itakeit runs as one Docker container with one SQLite file. It connects to Slack over Socket Mode, so it makes only outbound connections and needs no public URL, ingress or TLS certificate. The messages stay in Slack; the database holds only owners, statuses, timestamps, checklist ticks and the board message ID.
 
 ## How it works
 
@@ -10,8 +10,9 @@ itakeit runs as one Docker container with one SQLite file. It connects to Slack 
 - React 🙋 to take the task. Several people can own one task. Removing the reaction hands it back.
 - Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest status reaction wins. ✅ removes the task from the board.
 - ❓ pings the reporter in the thread. The reporter's reply pings the owners and clears the status.
-- Non-owners who react with a status emoji get a private hint to claim first.
-- Owners who go quiet on a task get one reminder in the thread after a configurable number of hours (default 48).
+- Non-owners who react with a status emoji get a private hint to claim first. With status_claims: true, any status reaction makes the reactor an owner instead.
+- Lines written as [ ] item in the issue become checkboxes on the status card. Anyone can tick them, and ticking the last one pings the owners, or the reporter if unclaimed, to set ✅.
+- Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours (default 48) until an owner posts or the status changes.
 - Messages posted while the bot was down are not lost: the first reaction on one turns it into a task.
 - Emoji are configurable, including custom workspace emoji.
 

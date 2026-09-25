@@ -9,8 +9,10 @@
     { icon: '🙋', title: 'Claim with one reaction', text: 'React 🙋 to take it. Several people can own a task. Remove the reaction to hand it back.' },
     { icon: '🚧', title: 'Status by emoji', text: 'Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.' },
     { icon: '❓', title: 'Ask the reporter', text: '❓ pings the reporter in the thread. Their reply pings the owners and clears the status.' },
-    { icon: '📌', title: 'A pinned board', text: 'One pinned message lists every open task with its status and owners, always current.' },
-    { icon: '⏰', title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread after a configurable number of hours.' },
+    { icon: '☑️', title: 'Checklists', text: 'Lines written as [ ] item in the issue become checkboxes on the status card. Anyone can tick them.' },
+    { icon: '📌', title: 'A pinned board', text: 'One pinned message counts the open tasks in each status and lists the oldest with their owners, always current.' },
+    { icon: '🔓', title: 'Status without claiming', text: 'Optional: with status_claims on, any status reaction makes you an owner, no 🙋 needed first.' },
+    { icon: '⏰', title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
   ]
 
   const config = `channel: C0123456789\ndb_path: /data/itakeit.db`
@@ -40,7 +42,9 @@ volumes:
     ['owner', 'reacts ❓', 'reporter is pinged in the thread'],
     ['reporter', 'replies while ❓ is set', 'owners are pinged, status falls back to claimed'],
     ['owner', 'replies in the thread', 'counts as activity and resets the reminder clock'],
-    ['non-owner', 'reacts with a status emoji', 'ignored, with a private hint to claim first'],
+    ['non-owner', 'reacts with a status emoji', 'ignored, with a private hint to claim first. With status_claims: true it makes them an owner and sets the status.'],
+    ['owner', 'removes their last 🙋 or status reaction, with status_claims: true', 'stops owning it'],
+    ['anyone', 'ticks a checklist item on the card', 'card and board show progress. Ticking the last item pings the owners, or the reporter if unclaimed, to set ✅.'],
   ]
 </script>
 
@@ -102,7 +106,7 @@ volumes:
           <summary>Show slack-app-manifest.yaml</summary>
           <Code code={manifest.trim()} label="slack-app-manifest.yaml" />
         </details>
-        <p>It requests only <code>channels:history</code>, <code>groups:history</code>, <code>chat:write</code>, <code>reactions:read</code> and <code>pins:write</code>.</p>
+        <p>It requests only <code>channels:history</code>, <code>groups:history</code>, <code>chat:write</code>, <code>reactions:read</code> and <code>pins:write</code>, and turns on Interactivity for the checklist checkboxes. Socket Mode delivers the clicks, so no request URL is needed.</p>
       </li>
       <li>
         <h3>Get the two tokens</h3>
@@ -115,7 +119,7 @@ volumes:
       </li>
       <li>
         <h3>Write config.yaml</h3>
-        <p>Two lines are enough. Every other setting has a default. Emoji, reminder interval and board size are documented in <a href="{repo}/blob/main/config.example.yaml">config.example.yaml</a>.</p>
+        <p>Two lines are enough. Every other setting has a default. Emoji, reminder interval, board size and <code>status_claims</code> (let anyone set a status without claiming first) are documented in <a href="{repo}/blob/main/config.example.yaml">config.example.yaml</a>.</p>
         <Code code={config} label="config.yaml" />
         <p>The container runs as uid 65532, so the file must be readable by others: <code>chmod 644 config.yaml</code>.</p>
       </li>
@@ -195,7 +199,7 @@ volumes:
   section { scroll-margin-top: 70px; }
 
   .band { background: var(--green-soft); border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); padding: 4rem 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.2rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.2rem; }
   .card { background: var(--panel); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 1.2rem 1.3rem; }
   .card h3 { margin: 0.4rem 0 0.3rem; font-size: 1.1rem; }
   .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
@@ -227,11 +231,13 @@ volumes:
   @media (max-width: 860px) {
     .hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 1.5rem; }
     .turtle { width: 120px; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     nav { gap: 0.8rem; }
     nav a { font-size: 0.85rem; }
   }
   @media (max-width: 520px) {
     nav a:not(:last-child):not([href="#setup"]) { display: none; }
     .steps > li { padding-left: 2.2rem; margin-left: 1.2rem; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
   }
 </style>

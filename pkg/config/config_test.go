@@ -12,7 +12,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DBPath != "itakeit.db" || c.StaleAfterHours != 48 || c.BoardMaxTasks != 50 {
+	if c.DBPath != "itakeit.db" || c.StaleAfterHours != 48 || c.BoardMaxTasks != 50 || c.DoneRetainDays != 30 {
 		t.Fatalf("defaults not applied: %+v", c)
 	}
 	if a, ok := c.Action("raising_hand::skin-tone-4"); !ok || a != task.Claim {
@@ -20,6 +20,13 @@ func TestDefaults(t *testing.T) {
 	}
 	if _, ok := c.Action("thumbsup"); ok {
 		t.Fatal("unmapped emoji must not resolve")
+	}
+}
+
+func TestDoneRetainOff(t *testing.T) {
+	c, err := Parse([]byte("channel: C1\ndone_retain_days: 0"))
+	if err != nil || c.DoneRetain() != 0 {
+		t.Fatalf("explicit 0 must disable cleanup, got %v %v", c, err)
 	}
 }
 

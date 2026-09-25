@@ -90,7 +90,7 @@ func (f *fakeAPI) find(kind, contains string) *call {
 
 func setup(t *testing.T) (*Bot, *fakeAPI, *store.Store) {
 	t.Helper()
-	cfg, err := config.Parse([]byte("channel: " + ch + "\nstale_after_hours: 24"))
+	cfg, err := config.Parse([]byte("channel: " + ch + "\nstale_after_hours: 24\ndone_retain_days: 0"))
 	if err != nil {
 		t.Fatal(err)
 	}

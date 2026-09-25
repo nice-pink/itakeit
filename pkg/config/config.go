@@ -28,6 +28,7 @@ var Defaults = Config{
 	DBPath:          "itakeit.db",
 	StaleAfterHours: 48,
 	BoardMaxTasks:   50,
+	DoneRetainDays:  30,
 	Emoji: map[task.Action][]string{
 		task.Claim:         {"raising_hand"},
 		task.Investigating: {"eyes"},
@@ -59,6 +60,14 @@ func Parse(raw []byte) (*Config, error) {
 	}
 	if c.BoardMaxTasks == 0 {
 		c.BoardMaxTasks = Defaults.BoardMaxTasks
+	}
+	// 0 is a valid value (keep forever), so only an absent key gets the default.
+	var set struct {
+		DoneRetainDays *int `yaml:"done_retain_days"`
+	}
+	yaml.Unmarshal(raw, &set)
+	if set.DoneRetainDays == nil {
+		c.DoneRetainDays = Defaults.DoneRetainDays
 	}
 	if len(c.Emoji) == 0 {
 		c.Emoji = Defaults.Emoji

@@ -13,7 +13,7 @@ board_max_tasks: 50
 
 # Done tasks are deleted from the database once they have had no activity for this
 # many days, checked hourly. Messages and cards in Slack are kept. 0 keeps them forever.
-done_retain_days: 0
+done_retain_days: 30
 
 # Action -> reaction names. The first emoji of each action is the one shown in
 # cards and on the board. Omit an action to disable it. If this block is present

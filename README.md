@@ -2,7 +2,9 @@
 
 # I take it
 
-A Slack bot that turns every message in one dedicated channel into a task people can claim with an emoji.
+Task tracking in Slack threads. Dead simple.
+
+A self-hosted Slack bot that turns every message in one dedicated channel into a task. People claim it and set its status with reactions. Homepage: [itakeit.nice.pink](https://itakeit.nice.pink).
 
 - Post an issue in the channel and it becomes a task. The bot replies in its thread with a status card.
 - React 🙋 (`:raising_hand:`) on the issue to take it. Several people can own one task. Remove the reaction to hand it back.

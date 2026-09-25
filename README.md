@@ -10,6 +10,7 @@ A self-hosted Slack bot that turns every message in one dedicated channel into a
 - React 🙋 (`:raising_hand:`) on the issue to take it. Several people can own one task. Remove the reaction to hand it back.
 - Owners set the status with reactions: 👀 investigating, 🚧 in progress, ❓ needs info, ⛔ blocked, ✅ done.
 - ❓ pings the reporter in the thread. When the reporter replies, the bot pings the owners and clears the status.
+- Lines written as `[ ] item` in the issue become a checklist on the status card. Anyone can tick them.
 - A pinned board message in the channel lists every open task with its status and owners.
 - Owners who stay silent on a task they are working on get a reminder in the thread, repeated every `stale_after_hours` until an owner posts in the thread or the status changes.
 
@@ -32,6 +33,8 @@ The manifest requests these bot scopes:
 | `chat:write` | status cards, the board, pings, private "only owners can…" hints |
 | `reactions:read` | receiving reaction events |
 | `pins:write` | pinning the board |
+
+The manifest also turns on **Interactivity**, which the checklist checkboxes need. Socket Mode delivers the clicks, so no request URL is required. An app created from an older manifest needs it switched on under **Interactivity & Shortcuts**.
 
 If you change scopes later, reinstall the app so they take effect.
 
@@ -90,10 +93,13 @@ Run **exactly one instance** per channel. Two instances would both reply to ever
 | reporter | replies in the thread while ❓ is set | owners are pinged and the status falls back to claimed |
 | owner | replies in the thread | counts as activity and resets the reminder clock |
 | non-owner | reacts with a status emoji | ignored, and the user gets a private hint to claim first |
+| anyone | ticks a checklist item on the status card | card and board show progress. An owner's tick counts as activity. Ticking the last item pings the owners (or the reporter, if unclaimed) to set ✅. |
 
 Reactions only count on the task message itself. Reactions on thread replies, the card or the board are ignored. Skin tone variants count as the base emoji.
 
 Messages posted while the bot was offline are not lost. The first 🙋 or status reaction on such a message turns it into a task, but only 🙋 makes the reactor an owner. Reactions *removed* while the bot was offline are not replayed. Remove the emoji and add it again to resync.
+
+A checklist line is `[ ] text` or `[x] text` on its own line, optionally after a list bullet, so a Slack bulleted list works. `[x]` starts ticked. Once an item is ticked or unticked on the card, the card wins over the message's `[ ]`/`[x]`. Ticks are stored by the item's text, so they survive reordering the message. Changing an item's text, or deleting an earlier line with the same text, starts it over from what the message says. The card shows up to 48 items and counts the rest. Items past 48 can only be ticked with `[x]` in the message. Cards posted before checklist support get their checkboxes on the task's next change.
 
 Editing the task message updates its line on the board. Deleting it removes the task and its status card.
 

@@ -39,8 +39,12 @@ func Card(t Task, emoji map[Action]string) string {
 			legend = append(legend, ":"+e+": "+labels[a])
 		}
 	}
-	return fmt.Sprintf("*Status:* %s\n*Owners:* %s\n_React on the message above: %s. Status reactions count from owners only._",
-		t.Label(emoji), owners, strings.Join(legend, " · "))
+	checklist := ""
+	if done, total := t.Progress(); total > 0 {
+		checklist = fmt.Sprintf("*Checklist:* %d/%d\n", done, total)
+	}
+	return fmt.Sprintf("*Status:* %s\n*Owners:* %s\n%s_React on the message above: %s. Status reactions count from owners only._",
+		t.Label(emoji), owners, checklist, strings.Join(legend, " · "))
 }
 
 // Board is the pinned overview of all open tasks, oldest first.
@@ -60,6 +64,9 @@ func Board(tasks []Task, emoji map[Action]string, max int, now time.Time) string
 		who := "unclaimed"
 		if len(t.Owners) > 0 {
 			who = Mentions(t.Owners)
+		}
+		if done, total := t.Progress(); total > 0 {
+			who += fmt.Sprintf(" · %d/%d", done, total)
 		}
 		fmt.Fprintf(&b, "• %s  %s · %s · <%s|open>\n", t.Label(emoji), Excerpt(t.Text, 80), who, t.Permalink)
 	}

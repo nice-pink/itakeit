@@ -132,3 +132,51 @@ func TestBoard(t *testing.T) {
 		t.Error("empty board")
 	}
 }
+
+func TestChecklistParse(t *testing.T) {
+	tk := Task{Text: "title\n[ ] a\n• [x] b\n- [X] a\nnot [ ] an item\n[ ]nospace\n* [ ]   c  "}
+	got := tk.Checklist()
+	if len(got) != 4 {
+		t.Fatalf("want 4 items, got %+v", got)
+	}
+	want := []Item{{Text: "a"}, {Text: "b", Checked: true}, {Text: "a", Checked: true}, {Text: "c"}}
+	for i, w := range want {
+		if got[i].Text != w.Text || got[i].Checked != w.Checked {
+			t.Fatalf("item %d: want %+v got %+v", i, w, got[i])
+		}
+	}
+	if got[0].Key == got[2].Key {
+		t.Fatal("duplicate item texts need distinct keys")
+	}
+}
+
+func TestCheck(t *testing.T) {
+	tk := &Task{Text: "[ ] a\n[x] b", Owners: []string{"UALICE001"}}
+	a, b := tk.Checklist()[0].Key, tk.Checklist()[1].Key
+	if e := tk.Check("UBYSTAND1", map[string]bool{b: true, "gone": true}, t0); e != NoChange {
+		t.Fatalf("no change expected, got %v", e)
+	}
+	if e := tk.Check("UBYSTAND1", map[string]bool{b: false}, t0); e != Changed || tk.Checklist()[1].Checked {
+		t.Fatalf("a card untick overrides [x], got %v", e)
+	}
+	if !tk.LastActivity.IsZero() {
+		t.Fatal("a non-owner tick is not owner activity")
+	}
+	if e := tk.Check("UALICE001", map[string]bool{a: true, b: true}, t0); e != ChecklistDone || !tk.LastActivity.Equal(t0) {
+		t.Fatalf("completing should report ChecklistDone and count as activity, got %v", e)
+	}
+	tk.Checks, tk.Status = nil, Done
+	if e := tk.Check("UALICE001", map[string]bool{a: true}, t0); e != Changed {
+		t.Fatalf("no nudge on a done task, got %v", e)
+	}
+}
+
+func TestSetTextPrunesTicks(t *testing.T) {
+	tk := &Task{Text: "[ ] a\n[ ] b"}
+	a, b := tk.Checklist()[0].Key, tk.Checklist()[1].Key
+	tk.Check("U1", map[string]bool{a: true, b: true}, t0)
+	tk.SetText("[ ] b")
+	if len(tk.Checks) != 1 || !tk.Checks[b] {
+		t.Fatalf("removed item's tick should go, kept one should stay: %v", tk.Checks)
+	}
+}

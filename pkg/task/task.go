@@ -35,6 +35,7 @@ type Task struct {
 	CreatedAt    time.Time
 	LastActivity time.Time // last claim, status change or thread reply by an owner
 	RemindedAt   time.Time
+	Checks       map[string]bool // checklist ticks set on the card, by Item.Key
 }
 
 type Effect int
@@ -45,6 +46,7 @@ const (
 	Denied              // a non-owner tried to set a status
 	AskReporter         // changed to needs_info: ping the reporter
 	NotifyOwners        // reporter answered a needs_info: ping the owners
+	ChecklistDone       // last checklist item ticked: nudge to close
 )
 
 func (t *Task) IsOwner(user string) bool { return slices.Contains(t.Owners, user) }

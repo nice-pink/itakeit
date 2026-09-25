@@ -1,11 +1,13 @@
 package bot
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/nice-pink/itakeit/pkg/config"
 	"github.com/nice-pink/itakeit/pkg/store"
@@ -24,6 +26,7 @@ type fakeAPI struct {
 	seq     int
 	history map[string]slack.Message
 	missing map[string]bool // ts that UpdateMessage reports as message_not_found
+	errs    []string        // errors the next UpdateMessage calls return, in order
 }
 
 func decode(opts []slack.MsgOption) (text, thread string) {
@@ -43,6 +46,11 @@ func (f *fakeAPI) PostMessage(c string, o ...slack.MsgOption) (string, string, e
 func (f *fakeAPI) UpdateMessage(c, ts string, o ...slack.MsgOption) (string, string, string, error) {
 	if f.missing[ts] {
 		return "", "", "", slack.SlackErrorResponse{Err: "message_not_found"}
+	}
+	if len(f.errs) > 0 {
+		e := f.errs[0]
+		f.errs = f.errs[1:]
+		return "", "", "", slack.SlackErrorResponse{Err: e}
 	}
 	text, _ := decode(o)
 	f.calls = append(f.calls, call{kind: "update", channel: c, ts: ts, text: text})
@@ -325,5 +333,108 @@ func TestSweepDone(t *testing.T) {
 	b.sweepDone()
 	if tk, _ := st.Get(ch, "100.3"); tk == nil {
 		t.Fatal("done_retain_days -1 must keep done tasks")
+	}
+}
+
+// tick simulates a click on the checkbox group of card block blockID, with the
+// given option values ticked afterwards.
+func tick(user, blockID string, ticked ...string) slack.InteractionCallback {
+	a := &slack.BlockAction{ActionID: checkAction, BlockID: blockID}
+	for _, v := range ticked {
+		a.SelectedOptions = append(a.SelectedOptions, slack.OptionBlockObject{Value: v})
+	}
+	cb := slack.InteractionCallback{Type: slack.InteractionTypeBlockActions, User: slack.User{ID: user}}
+	cb.Channel.ID = ch
+	cb.ActionCallback.BlockActions = []*slack.BlockAction{a}
+	return cb
+}
+
+func TestChecklist(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "deploy v2\n• [ ] migrate db\n• [ ] flip flag"}))
+	card := f.find("post", "Checklist:* 0/2")
+	if card == nil {
+		t.Fatalf("card should show progress, calls: %+v", f.calls)
+	}
+	tk, _ := st.Get(ch, "100.1")
+	items := tk.Checklist()
+	blockA, blockB := "check:100.1:"+items[0].Key, "check:100.1:"+items[1].Key
+	raw, _ := json.Marshal(cardBlocks(tk, b.emoji))
+	if !strings.Contains(string(raw), `"type":"checkboxes"`) || !strings.Contains(string(raw), `"block_id":"`+blockB+`"`) {
+		t.Fatalf("card blocks should carry one checkbox group per item: %s", raw)
+	}
+	b.Handle(react("UALICE001", "raising_hand", "100.1", true))
+
+	f.reset()
+	b.HandleInteraction(tick("UBYSTAND1", blockA, items[0].Key))
+	if c := f.find("update", "Checklist:* 1/2"); c == nil || c.ts != card.ts {
+		t.Fatalf("anyone's tick should update the card, calls: %+v", f.calls)
+	}
+	if f.find("update", "· 1/2 ·") == nil {
+		t.Fatalf("board should show progress, calls: %+v", f.calls)
+	}
+
+	// Reordering the message keeps the tick, because keys follow the item text.
+	b.Handle(msg(&slackevents.MessageEvent{SubType: "message_changed", Message: &slack.Msg{Timestamp: "100.1", Text: "deploy v2\n- [ ] flip flag\n- [ ] migrate db"}}))
+	tk, _ = st.Get(ch, "100.1")
+	if got := tk.Checklist(); got[1].Text != "migrate db" || !got[1].Checked || got[0].Checked {
+		t.Fatalf("tick lost on reorder: %+v", got)
+	}
+
+	f.reset()
+	b.HandleInteraction(tick("UALICE001", blockB, items[1].Key))
+	if f.find("post", "<@UALICE001>: every checklist item is ticked. React :white_check_mark:") == nil {
+		t.Fatalf("completing the checklist should nudge the owners, calls: %+v", f.calls)
+	}
+	f.reset()
+	b.HandleInteraction(tick("UALICE001", blockB, items[1].Key))
+	if f.find("post", "every checklist item") != nil {
+		t.Fatalf("an unchanged click must not nudge again, calls: %+v", f.calls)
+	}
+}
+
+func TestChecklistStaleViewKeepsOtherTicks(t *testing.T) {
+	b, _, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "x\n[ ] a\n[ ] b"}))
+	tk, _ := st.Get(ch, "100.1")
+	a, bk := tk.Checklist()[0].Key, tk.Checklist()[1].Key
+	b.HandleInteraction(tick("UONE00001", "check:100.1:"+a, a))
+	// UTWO's card still shows a unticked; clicking b reports only b.
+	b.HandleInteraction(tick("UTWO00001", "check:100.1:"+bk, bk))
+	tk, _ = st.Get(ch, "100.1")
+	if got := tk.Checklist(); !got[0].Checked || !got[1].Checked {
+		t.Fatalf("a click on one item must not untick another: %+v", got)
+	}
+}
+
+func TestCardBlockLimits(t *testing.T) {
+	var lines []string
+	for i := range 60 {
+		lines = append(lines, fmt.Sprintf("[ ] item %d", i))
+	}
+	tk := &task.Task{TS: "100.1", Text: strings.Join(lines, "\n")}
+	if n := len(cardBlocks(tk, nil)); n > 50 {
+		t.Fatalf("card has %d blocks, Block Kit allows 50", n)
+	}
+	if got := optionText(strings.Repeat("🚀", 100)); len(utf16.Encode([]rune(got))) > 75 {
+		t.Fatalf("option text %d UTF-16 units, limit 75", len(utf16.Encode([]rune(got))))
+	}
+}
+
+func TestCardFallback(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "x\n[ ] a"}))
+	tk, _ := st.Get(ch, "100.1")
+
+	f.reset()
+	f.errs = []string{"ratelimited"}
+	b.updateCard(tk)
+	if len(f.calls) != 0 {
+		t.Fatalf("a transient error must not trigger the text-only fallback, calls: %+v", f.calls)
+	}
+	f.errs = []string{"invalid_blocks"}
+	b.updateCard(tk)
+	if c := f.find("update", "Checklist:* 0/1"); c == nil || c.ts != tk.CardTS || len(f.calls) != 1 {
+		t.Fatalf("rejected blocks should fall back to a text-only edit of the same card, calls: %+v", f.calls)
 	}
 }

@@ -8,8 +8,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/nice-pink/itakeit/pkg/config"
 	"github.com/nice-pink/itakeit/pkg/store"
@@ -20,6 +23,9 @@ import (
 )
 
 func boardKey(channel string) string { return "board_ts:" + channel }
+
+// checkAction is the action_id of the checklist checkboxes on a card.
+const checkAction = "checklist"
 
 // API is the subset of *slack.Client the bot uses.
 type API interface {
@@ -50,7 +56,7 @@ func New(api API, st *store.Store, cfg *config.Config, botUserID, botID string) 
 func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 	errc := make(chan error, 1)
 	go func() { errc <- sm.RunContext(ctx) }()
-	events := ackLoop(ctx, sm)
+	events, interactions := ackLoop(ctx, sm)
 
 	b.refreshBoard()
 	tick := time.NewTicker(staleInterval(b.cfg.StaleAfter()))
@@ -74,15 +80,18 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 			b.sweepDone()
 		case e := <-events:
 			b.Handle(e)
+		case cb := <-interactions:
+			b.HandleInteraction(cb)
 		}
 	}
 }
 
 // ackLoop acknowledges every envelope the moment it arrives, so Slack's 3 s ack
-// deadline never depends on how long handling takes, and queues the events for
-// the single handler goroutine.
-func ackLoop(ctx context.Context, sm *socketmode.Client) <-chan slackevents.EventsAPIEvent {
+// deadline never depends on how long handling takes, and queues the events and
+// interactions for the single handler goroutine.
+func ackLoop(ctx context.Context, sm *socketmode.Client) (<-chan slackevents.EventsAPIEvent, <-chan slack.InteractionCallback) {
 	out := make(chan slackevents.EventsAPIEvent, 1024)
+	clicks := make(chan slack.InteractionCallback, 1024)
 	go func() {
 		for {
 			select {
@@ -109,11 +118,24 @@ func ackLoop(ctx context.Context, sm *socketmode.Client) <-chan slackevents.Even
 					default:
 						slog.Error("event queue full, dropping event", "type", e.InnerEvent.Type)
 					}
+				case socketmode.EventTypeInteractive:
+					if evt.Request != nil {
+						sm.Ack(*evt.Request)
+					}
+					cb, ok := evt.Data.(slack.InteractionCallback)
+					if !ok {
+						continue
+					}
+					select {
+					case clicks <- cb:
+					default:
+						slog.Error("interaction queue full, dropping", "type", cb.Type)
+					}
 				}
 			}
 		}
 	}()
-	return out
+	return out, clicks
 }
 
 func staleInterval(after time.Duration) time.Duration {
@@ -129,6 +151,53 @@ func (b *Bot) Handle(e slackevents.EventsAPIEvent) {
 		b.onReaction(ev.User, ev.Reaction, ev.Item, true)
 	case *slackevents.ReactionRemovedEvent:
 		b.onReaction(ev.User, ev.Reaction, ev.Item, false)
+	}
+}
+
+// HandleInteraction applies checklist ticks from a card. Exported for tests.
+func (b *Bot) HandleInteraction(cb slack.InteractionCallback) {
+	if cb.Type != slack.InteractionTypeBlockActions || cb.Channel.ID != b.cfg.Channel {
+		return
+	}
+	for _, a := range cb.ActionCallback.BlockActions {
+		if a.ActionID == checkAction {
+			b.onCheck(cb.User.ID, a)
+		}
+	}
+}
+
+// onCheck applies one click. Every item is its own checkbox element, so a click
+// reports exactly one item and a stale view of the others cannot untick them.
+// The block ID is "check:<task ts>:<item key>".
+func (b *Bot) onCheck(user string, a *slack.BlockAction) {
+	parts := strings.SplitN(a.BlockID, ":", 3)
+	if len(parts) != 3 || parts[0] != "check" {
+		return
+	}
+	t := b.get(parts[1])
+	if t == nil {
+		return // swept or unknown: the card is frozen
+	}
+	key := parts[2]
+	on := slices.ContainsFunc(a.SelectedOptions, func(o slack.OptionBlockObject) bool { return o.Value == key })
+	eff := t.Check(user, map[string]bool{key: on}, b.now())
+	if eff == task.NoChange {
+		b.updateCard(t) // the clicker's view may be stale or show a removed item
+		return
+	}
+	b.save(t)
+	b.updateCard(t)
+	b.refreshBoard()
+	if eff == task.ChecklistDone {
+		who := task.Mention(t.Reporter)
+		if len(t.Owners) > 0 {
+			who = task.Mentions(t.Owners)
+		}
+		msg := fmt.Sprintf("%s: every checklist item is ticked.", who)
+		if e, ok := b.emoji[task.Done]; ok {
+			msg += fmt.Sprintf(" React :%s: on the task when it is done.", e)
+		}
+		b.say(t, msg)
 	}
 }
 
@@ -200,8 +269,12 @@ func (b *Bot) onEdit(ts, text string) {
 	if t == nil || t.Text == text {
 		return
 	}
-	t.Text = text
+	before := t.Checklist()
+	t.SetText(text)
 	b.save(t)
+	if !slices.Equal(before, t.Checklist()) {
+		b.updateCard(t)
+	}
 	b.refreshBoard()
 }
 
@@ -322,22 +395,72 @@ func (b *Bot) sweepDone() {
 }
 
 func (b *Bot) updateCard(t *task.Task) {
-	text := slack.MsgOptionText(task.Card(*t, b.emoji), false)
+	// If Slack rejects the checklist blocks, fall back to the plain-text card, so
+	// a checklist can never cost a task its card. Other errors (rate limits,
+	// timeouts) must not strip the checkboxes or post a second card.
+	if err := b.putCard(t, cardBlocks(t, b.emoji)); err != nil && strings.HasPrefix(err.Error(), "invalid_blocks") {
+		b.putCard(t, nil)
+	}
+}
+
+// putCard edits or posts the card. A nil blocks renders text only and clears
+// blocks on an edit.
+func (b *Bot) putCard(t *task.Task, blocks []slack.Block) error {
+	opts := []slack.MsgOption{slack.MsgOptionText(task.Card(*t, b.emoji), false), slack.MsgOptionBlocks(blocks...)}
 	if t.CardTS != "" {
-		if _, _, _, err := b.api.UpdateMessage(t.Channel, t.CardTS, text); err == nil {
-			return
-		} else if err.Error() != "message_not_found" {
-			slog.Warn("update card", "ts", t.TS, "err", err)
-			return
+		_, _, _, err := b.api.UpdateMessage(t.Channel, t.CardTS, opts...)
+		if err == nil || err.Error() != "message_not_found" {
+			if err != nil {
+				slog.Warn("update card", "ts", t.TS, "err", err)
+			}
+			return err
 		}
 	}
-	_, ts, err := b.api.PostMessage(t.Channel, text, slack.MsgOptionTS(t.TS))
+	if blocks == nil {
+		opts = opts[:1]
+	}
+	_, ts, err := b.api.PostMessage(t.Channel, append(opts, slack.MsgOptionTS(t.TS))...)
 	if err != nil {
 		slog.Warn("post card", "ts", t.TS, "err", err)
-		return
+		return err
 	}
 	t.CardTS = ts
 	b.save(t)
+	return nil
+}
+
+// maxCardItems keeps the card within Block Kit's 50 blocks: the card text, one
+// actions block per item, and a note when items are left off.
+const maxCardItems = 48
+
+// cardBlocks renders the card text, then one single-option checkbox group per
+// checklist item.
+func cardBlocks(t *task.Task, emoji map[task.Action]string) []slack.Block {
+	blocks := []slack.Block{slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, task.Card(*t, emoji), false, false), nil, nil)}
+	items := t.Checklist()
+	for _, it := range items[:min(len(items), maxCardItems)] {
+		o := slack.NewOptionBlockObject(it.Key, slack.NewTextBlockObject(slack.MarkdownType, optionText(it.Text), false, false), nil)
+		el := slack.NewCheckboxGroupsBlockElement(checkAction, o)
+		if it.Checked {
+			el.InitialOptions = []*slack.OptionBlockObject{o}
+		}
+		blocks = append(blocks, slack.NewActionBlock("check:"+t.TS+":"+it.Key, el))
+	}
+	if n := len(items) - maxCardItems; n > 0 {
+		blocks = append(blocks, slack.NewContextBlock("", slack.NewTextBlockObject(slack.MarkdownType,
+			fmt.Sprintf("%d more checklist items are counted but not shown here.", n), false, false)))
+	}
+	return blocks
+}
+
+// optionText fits an item into Block Kit's 75-character option text, counted in
+// UTF-16 units so emoji-heavy items stay inside the limit too.
+func optionText(s string) string {
+	for n := 74; ; n-- {
+		if e := task.Excerpt(s, n); len(utf16.Encode([]rune(e))) <= 75 || n <= 1 {
+			return e
+		}
+	}
 }
 
 func (b *Bot) refreshBoard() {

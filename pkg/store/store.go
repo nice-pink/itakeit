@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS owners (
 	channel TEXT NOT NULL, ts TEXT NOT NULL, pos INTEGER NOT NULL, user TEXT NOT NULL,
 	PRIMARY KEY (channel, ts, user),
 	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS checks (
+	channel TEXT NOT NULL, ts TEXT NOT NULL, item TEXT NOT NULL, checked INTEGER NOT NULL,
+	PRIMARY KEY (channel, ts, item),
+	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 
 type Store struct{ db *sql.DB }
@@ -54,7 +58,7 @@ func (s *Store) Open(channel string) ([]task.Task, error) {
 	return s.query(`WHERE channel = ? AND status != ? ORDER BY CAST(ts AS REAL), ts`, channel, string(task.Done))
 }
 
-// Save upserts the task and replaces its owner list.
+// Save upserts the task and replaces its owner list and checklist ticks.
 func (s *Store) Save(t *task.Task) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -78,6 +82,14 @@ func (s *Store) Save(t *task.Task) error {
 			return err
 		}
 	}
+	if _, err := tx.Exec(`DELETE FROM checks WHERE channel = ? AND ts = ?`, t.Channel, t.TS); err != nil {
+		return err
+	}
+	for k, c := range t.Checks {
+		if _, err := tx.Exec(`INSERT INTO checks VALUES (?,?,?,?)`, t.Channel, t.TS, k, c); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -87,7 +99,7 @@ func (s *Store) Delete(channel, ts string) error {
 }
 
 // DeleteDone removes a channel's done tasks whose last activity is before cutoff
-// and returns how many went. Owners cascade.
+// and returns how many went. Owners and checks cascade.
 func (s *Store) DeleteDone(channel string, cutoff time.Time) (int64, error) {
 	r, err := s.db.Exec(`DELETE FROM tasks WHERE channel = ? AND status = ? AND last_activity < ?`,
 		channel, string(task.Done), cutoff.Unix())
@@ -138,6 +150,9 @@ func (s *Store) query(where string, args ...any) ([]task.Task, error) {
 		if out[i].Owners, err = s.owners(out[i].Channel, out[i].TS); err != nil {
 			return nil, err
 		}
+		if out[i].Checks, err = s.checks(out[i].Channel, out[i].TS); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -155,6 +170,27 @@ func (s *Store) owners(channel, ts string) ([]string, error) {
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) checks(channel, ts string) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT item, checked FROM checks WHERE channel = ? AND ts = ?`, channel, ts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out map[string]bool
+	for rows.Next() {
+		var k string
+		var c bool
+		if err := rows.Scan(&k, &c); err != nil {
+			return nil, err
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[k] = c
 	}
 	return out, rows.Err()
 }

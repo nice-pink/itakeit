@@ -11,7 +11,7 @@ A self-hosted Slack bot that turns every message in one dedicated channel into a
 - Owners set the status with reactions: 👀 investigating, 🚧 in progress, ❓ needs info, ⛔ blocked, ✅ done.
 - ❓ pings the reporter in the thread. When the reporter replies, the bot pings the owners and clears the status.
 - Lines written as `[ ] item` in the issue become a checklist on the status card. Anyone can tick them.
-- A pinned board message in the channel lists every open task with its status and owners.
+- A pinned board message in the channel counts the open tasks in each status and lists the oldest `board_max_tasks` of them with their status and owners.
 - Owners who stay silent on a task they are working on get a reminder in the thread, repeated every `stale_after_hours` until an owner posts in the thread or the status changes.
 
 It uses Socket Mode, so it needs no public URL, ingress or TLS. It runs as a single process with a SQLite file.

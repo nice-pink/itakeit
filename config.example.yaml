@@ -8,7 +8,8 @@ db_path: itakeit.db
 # this many hours without a claim, status change or thread reply from an owner.
 stale_after_hours: 48
 
-# Maximum tasks listed on the pinned board.
+# Maximum tasks listed on the pinned board, oldest first. The counts per status at
+# the top of the board always include every open task.
 board_max_tasks: 50
 
 # Done tasks are deleted from the database once they have had no activity for this

@@ -120,13 +120,17 @@ func TestBoard(t *testing.T) {
 		{Text: "typo on pricing page", Permalink: "https://x/p2"},
 	}
 	b := Board(tasks, emoji, 1, t0)
-	for _, want := range []string{"2 open", ":construction: in progress", "<@UALICE001>", "<https://x/p1|open>", "…and 1 more"} {
+	for _, want := range []string{"2 open", ":white_circle: 1 unclaimed · :construction: 1 in progress\n", ":construction: in progress", "<@UALICE001>", "<https://x/p1|open>", "…and 1 more"} {
 		if !strings.Contains(b, want) {
 			t.Errorf("board missing %q:\n%s", want, b)
 		}
 	}
 	if strings.Contains(b, "typo") {
 		t.Errorf("board should stop at max:\n%s", b)
+	}
+	mixed := append(tasks, Task{Owners: []string{"UBOB00001"}}, Task{Owners: []string{"UBOB00001"}, Status: Blocked}, Task{})
+	if want := ":white_circle: 2 unclaimed · :raising_hand: 1 claimed · :construction: 1 in progress · 1 blocked\n"; !strings.Contains(Board(mixed, emoji, 1, t0), want) {
+		t.Errorf("counts cover every task in state order, icon-less when the emoji is disabled:\n%s", Board(mixed, emoji, 1, t0))
 	}
 	if !strings.Contains(Board(nil, emoji, 10, t0), "Nothing open") {
 		t.Error("empty board")

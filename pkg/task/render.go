@@ -17,14 +17,48 @@ var labels = map[Action]string{
 
 // Label is the human status, derived from owners when no explicit status is set.
 func (t Task) Label(emoji map[Action]string) string {
+	i, l := t.label(emoji)
+	return i + l
+}
+
+// label splits Label into its icon and text.
+func (t Task) label(emoji map[Action]string) (string, string) {
 	switch {
 	case t.Status != "":
-		return icon(emoji, t.Status) + labels[t.Status]
+		return icon(emoji, t.Status), labels[t.Status]
 	case len(t.Owners) > 0:
-		return icon(emoji, Claim) + "claimed"
+		return icon(emoji, Claim), "claimed"
 	default:
-		return ":white_circle: unclaimed"
+		return ":white_circle: ", "unclaimed"
 	}
+}
+
+// boardOrder is the order of the counts line on the board: every open state.
+var boardOrder = func() []string {
+	out := []string{"unclaimed", "claimed"}
+	for _, a := range statusActions {
+		if a != Done {
+			out = append(out, labels[a])
+		}
+	}
+	return out
+}()
+
+// counts renders how many tasks are in each state, skipping empty ones.
+func counts(tasks []Task, emoji map[Action]string) string {
+	n, icons := map[string]int{}, map[string]string{}
+	for _, t := range tasks {
+		i, l := t.label(emoji)
+		n[l]++
+		icons[l] = i
+	}
+	var out []string
+	for _, l := range boardOrder {
+		if n[l] > 0 {
+			out = append(out, fmt.Sprintf("%s%d %s", icons[l], n[l], l))
+		}
+	}
+	return strings.Join(out, " · ")
 }
 
 // Card is the status message the bot keeps in each task's thread. statusClaims
@@ -52,7 +86,8 @@ func Card(t Task, emoji map[Action]string, statusClaims bool) string {
 		t.Label(emoji), owners, checklist, strings.Join(legend, " · "), rule)
 }
 
-// Board is the pinned overview of all open tasks, oldest first.
+// Board is the pinned overview: how many open tasks are in each state, then up
+// to max of them, oldest first.
 func Board(tasks []Task, emoji map[Action]string, max int, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "*I take it: %d open* (updated <!date^%d^{date_short_pretty} {time}|%s>)\n",
@@ -61,6 +96,7 @@ func Board(tasks []Task, emoji map[Action]string, max int, now time.Time) string
 		b.WriteString("Nothing open. :tada:")
 		return b.String()
 	}
+	b.WriteString(counts(tasks, emoji) + "\n")
 	for i, t := range tasks {
 		if max > 0 && i == max {
 			fmt.Fprintf(&b, "…and %d more", len(tasks)-max)

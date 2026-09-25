@@ -6,3 +6,4 @@ config.yaml
 .env
 cover.out
 .git
+homepage/

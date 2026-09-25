@@ -57,6 +57,16 @@ The log should show `authenticated` and then `connected to slack`, and a board m
 
 ### 5. Run in Docker
 
+Pull the published image from GitHub Container Registry:
+
+```
+docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data ghcr.io/nice-pink/itakeit:latest
+```
+
+`latest` follows `main`. Release tags `vX.Y.Z` also publish `X.Y.Z` and `X.Y`, and every build publishes `sha-<short>`. Images are built for linux/amd64 and linux/arm64.
+
+Or build it yourself:
+
 ```
 docker build -t itakeit . && docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data itakeit
 ```

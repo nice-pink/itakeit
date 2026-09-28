@@ -1,7 +1,7 @@
 // Package bot wires Slack Socket Mode events to task state.
 //
 // All events and timers are handled on one goroutine, so state changes never
-// race and the store needs no locking beyond SQLite's own.
+// race and the store needs no locking beyond the database's own.
 package bot
 
 import (

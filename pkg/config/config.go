@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Channel         string                   `yaml:"channel"`
 	DBPath          string                   `yaml:"db_path"`
+	DatabaseURL     string                   `yaml:"database_url"`
 	StaleAfterHours int                      `yaml:"stale_after_hours"`
 	BoardMaxTasks   int                      `yaml:"board_max_tasks"`
 	DoneRetainDays  int                      `yaml:"done_retain_days"`

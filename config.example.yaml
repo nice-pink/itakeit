@@ -1,8 +1,14 @@
 # Channel ID of the dedicated channel (not its name). Find it under channel details -> About.
 channel: C0123456789
 
-# SQLite file holding owners, statuses and the board message timestamp.
+# SQLite file holding owners, statuses and the board message timestamp. Ignored when
+# a Postgres URL is set.
 db_path: itakeit.db
+
+# Postgres URL. When set, Postgres is used instead of the SQLite file. The
+# ITAKEIT_DATABASE_URL environment variable overrides it; prefer that, since this
+# file would otherwise hold the database password.
+# database_url: postgres://itakeit:secret@db:5432/itakeit
 
 # Owners of a claimed/investigating/in-progress task get one thread reminder after
 # this many hours without a claim, status change or thread reply from an owner.

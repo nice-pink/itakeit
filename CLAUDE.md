@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-itakeit is a Slack bot (Go, Socket Mode, SQLite via pure-Go `modernc.org/sqlite`, no cgo) that turns top-level messages in one channel into tasks claimed and status-tracked with reactions. User-facing behaviour and setup are in `README.md`; keep its Usage table in sync when behaviour changes.
+itakeit is a Slack bot (Go, Socket Mode, SQLite via pure-Go `modernc.org/sqlite`, or Postgres via `pgx` when `ITAKEIT_DATABASE_URL` or config `database_url` is set (env wins), no cgo) that turns top-level messages in one channel into tasks claimed and status-tracked with reactions. User-facing behaviour and setup are in `README.md`; keep its Usage table in sync when behaviour changes.
 
 ## Reactions are the interface
 
@@ -25,6 +25,7 @@ Dependency direction: `cmd/itakeit` → `pkg/bot` → `pkg/store`, `pkg/config` 
 
 Gotchas:
 - The schema is `CREATE TABLE IF NOT EXISTS` with no migrations, and `Save` inserts positionally (`VALUES (?,?,...)`). Adding a column breaks existing databases and depends on column order.
+- One schema and one set of queries serve both databases. Write `?` placeholders (`Store.q` rewrites them to `$N` for Postgres, so no query may contain a literal `?`), quote `"user"`, and use types both accept (`BIGINT`, `BOOLEAN`, `DOUBLE PRECISION`). Store tests cover Postgres only with `ITAKEIT_TEST_DATABASE_URL` set.
 - The board is posted as a placeholder and then filled by `UpdateMessage`, because a fresh post would notify every mentioned owner. Keep it that way.
 - Cards and the board self-heal: an `UpdateMessage` error whose text is exactly `message_not_found` triggers a repost; any other error is only logged.
 - A deleted task message arrives as `message_changed` with a `tombstone` subtype (it has the card as a reply), not as `message_deleted`. Both paths call `onDelete`.

@@ -14,7 +14,7 @@ A self-hosted Slack bot that turns every message in one dedicated channel into a
 - A pinned board message in the channel counts the open tasks in each status and lists the oldest `board_max_tasks` of them with their status and owners.
 - Owners who stay silent on a task they are working on get a reminder in the thread, repeated every `stale_after_hours` until an owner posts in the thread or the status changes.
 
-It uses Socket Mode, so it needs no public URL, ingress or TLS. It runs as a single process with a SQLite file.
+It uses Socket Mode, so it needs no public URL, ingress or TLS. It runs as a single process with a SQLite file, or with Postgres when a database URL is configured.
 
 ## Setup
 
@@ -76,7 +76,11 @@ Or build it yourself:
 docker build -t itakeit . && docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data itakeit
 ```
 
-Set `db_path: /data/itakeit.db` in `config.yaml` so state survives container restarts. The runtime image runs as uid 65532 and creates `/data` owned by that user, so the named volume above is writable. If you bind-mount a host directory instead, make it writable for uid 65532. The bot makes only outbound connections, so it needs no port.
+With SQLite, set `db_path: /data/itakeit.db` in `config.yaml` so state survives container restarts. The runtime image runs as uid 65532 and creates `/data` owned by that user, so the named volume above is writable. If you bind-mount a host directory instead, make it writable for uid 65532. The bot makes only outbound connections, so it needs no port.
+
+### Postgres
+
+Set `ITAKEIT_DATABASE_URL` to use Postgres instead of SQLite, for example `ITAKEIT_DATABASE_URL=postgres://itakeit:secret@db:5432/itakeit` (add `-e ITAKEIT_DATABASE_URL` to `docker run`), or set `database_url` in `config.yaml`. The environment variable wins when both are set; prefer it, because the URL holds the password. `db_path` is then ignored. Connecting times out after 10 s unless the URL sets a non-zero `connect_timeout`. Fields the URL leaves out (host, user, password, `sslmode`) fall back to the standard `PG*` environment variables and `~/.pgpass`, so give the full URL when the environment carries another service's. The bot creates its tables on start (`tasks`, `owners`, `checks`, `kv`). These names are generic, so give it its own database, or its own schema: run `CREATE SCHEMA itakeit` first and add `search_path=itakeit` to the URL's query string. Existing SQLite data is not copied over; the bot starts empty and tasks come back as people react.
 
 Run **exactly one instance** per channel. Two instances would both reply to every event and post duplicate cards.
 
@@ -114,7 +118,7 @@ Messages from integrations and webhooks count as tasks too, with the integration
 - **Disabling an action:** leave it out of `emoji`. `claim` is required.
 - **Status without claiming:** `status_claims: true` lets anyone set a status. Everyone who adds a 🙋 or status reaction while the bot is running becomes an owner, and stays one until they have none left on the message. Reactions added while the bot was offline, or before the flag was on, don't count until re-added. When the bot can't read the message's reactions after a removal, it keeps the owner. Turning the flag off later leaves status-only owners in place; they hand a task back by adding and removing 🙋.
 - **Reminders:** raise or lower `stale_after_hours`. Tasks that are blocked or waiting for info are never nudged.
-- **Database cleanup:** set `done_retain_days` to delete done tasks from SQLite after that many days without activity, checked hourly. Defaults to 30. Set `-1` to keep them forever. Messages and cards stay in Slack, but a swept task is frozen: reactions on it are ignored, deleting it leaves its card, and it can't be reopened. Messages older than `done_retain_days` are also never adopted, so a message missed while the bot was offline that long is not picked up.
+- **Database cleanup:** set `done_retain_days` to delete done tasks from the database after that many days without activity, checked hourly. Defaults to 30. Set `-1` to keep them forever. Messages and cards stay in Slack, but a swept task is frozen: reactions on it are ignored, deleting it leaves its card, and it can't be reopened. Messages older than `done_retain_days` are also never adopted, so a message missed while the bot was offline that long is not picked up.
 
 ## How it works
 
@@ -123,14 +127,14 @@ cmd/itakeit     startup: config, tokens, auth test, Socket Mode client
 pkg/config      YAML config, reaction -> action lookup
 pkg/task        task model, state transitions, card/board rendering (pure, no I/O)
 pkg/bot         Socket Mode event loop and Slack calls
-pkg/store       SQLite persistence
+pkg/store       SQLite or Postgres persistence
 ```
 
 - One goroutine handles every event and the reminder timer, so there is no locking in the application.
 - A separate goroutine acknowledges each event the moment it arrives, so a slow Slack API call never delays an ack. Events still queued when the bot stops or crashes are not redelivered. Re-adding the reaction repairs it. A redelivered message never resets a task that already exists.
 - Slack API calls time out after 15 s and are retried up to 3 times on rate limits.
 - The board is posted as a placeholder and filled by an edit, because edits don't notify anyone, and reposting the board would otherwise ping every owner.
-- The channel is the record of what was said. SQLite holds only owners, statuses, timestamps, checklist ticks and the board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board, and tasks come back as people react.
+- The channel is the record of what was said. The database holds only owners, statuses, timestamps, checklist ticks and the board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board, and tasks come back as people react.
 - If someone deletes the board or a status card, the bot posts and pins a new one on the next change.
 
 ## Development
@@ -139,4 +143,4 @@ pkg/store       SQLite persistence
 ./build
 ```
 
-This runs `go test ./...` and builds `bin/itakeit`. The bot tests drive the real event handlers against a fake Slack API and a temporary SQLite file.
+This runs `go test ./...` and builds `bin/itakeit`. The bot tests drive the real event handlers against a fake Slack API and a temporary SQLite file. `ITAKEIT_TEST_DATABASE_URL=postgres://...` also runs the store tests against Postgres, in a throwaway schema.

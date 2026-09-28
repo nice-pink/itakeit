@@ -1,45 +1,112 @@
-// Package store persists tasks in SQLite. The Slack channel is the source of
-// truth for what was said; this is the index for owners, status and the board.
+// Package store persists tasks in SQLite or Postgres. The Slack channel is the
+// source of truth for what was said; this is the index for owners, status and the board.
 package store
 
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/nice-pink/itakeit/pkg/task"
 	_ "modernc.org/sqlite"
 )
 
+// One schema for both databases: BIGINT and BOOLEAN get INTEGER and NUMERIC
+// affinity in SQLite, and "user" is quoted because it is reserved in Postgres.
+// Databases created before these types existed keep INTEGER columns, which read
+// back the same.
 const schema = `
 CREATE TABLE IF NOT EXISTS tasks (
 	channel TEXT NOT NULL, ts TEXT NOT NULL,
 	reporter TEXT NOT NULL, text TEXT NOT NULL, permalink TEXT NOT NULL, card_ts TEXT NOT NULL,
-	status TEXT NOT NULL, created_at INTEGER NOT NULL, last_activity INTEGER NOT NULL, reminded_at INTEGER NOT NULL,
+	status TEXT NOT NULL, created_at BIGINT NOT NULL, last_activity BIGINT NOT NULL, reminded_at BIGINT NOT NULL,
 	PRIMARY KEY (channel, ts));
 CREATE TABLE IF NOT EXISTS owners (
-	channel TEXT NOT NULL, ts TEXT NOT NULL, pos INTEGER NOT NULL, user TEXT NOT NULL,
-	PRIMARY KEY (channel, ts, user),
+	channel TEXT NOT NULL, ts TEXT NOT NULL, pos INTEGER NOT NULL, "user" TEXT NOT NULL,
+	PRIMARY KEY (channel, ts, "user"),
 	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS checks (
-	channel TEXT NOT NULL, ts TEXT NOT NULL, item TEXT NOT NULL, checked INTEGER NOT NULL,
+	channel TEXT NOT NULL, ts TEXT NOT NULL, item TEXT NOT NULL, checked BOOLEAN NOT NULL,
 	PRIMARY KEY (channel, ts, item),
 	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+	pg bool
+}
 
+// Open opens or creates the SQLite file at path.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, err
+	return initSchema(&Store{db: db})
+}
+
+// OpenPostgres connects with a postgres:// URL or key=value DSN and creates the
+// tables if missing. pgx waits forever for a connection by default, and every
+// store call runs on the bot's single event goroutine, so a DSN without
+// connect_timeout gets 10 s.
+// HACK: queries themselves have no timeout; a server that stalls after
+// connecting still blocks the bot. Upgrade path: pass a context with a
+// deadline through every Store method.
+func OpenPostgres(dsn string) (*Store, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		// pgx quotes the DSN in its parse error with the password masked only
+		// best-effort (key=value DSNs and a stray @ leak it), so drop the quote
+		// and keep only the wrapped cause, which does not contain the DSN.
+		if cause := errors.Unwrap(err); cause != nil {
+			return nil, fmt.Errorf("cannot parse database URL: %w", cause)
+		}
+		return nil, errors.New("cannot parse database URL")
 	}
-	return &Store{db}, nil
+	if cfg.ConnectTimeout == 0 {
+		cfg.ConnectTimeout = 10 * time.Second
+	}
+	return initSchema(&Store{db: stdlib.OpenDB(*cfg), pg: true})
+}
+
+// initSchema runs one statement per Exec so neither driver has to accept a
+// multi-statement string.
+func initSchema(s *Store) (*Store, error) {
+	for _, stmt := range strings.Split(schema, ";") {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		if _, err := s.db.Exec(stmt); err != nil {
+			s.db.Close()
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// q rewrites ? placeholders to Postgres's $1, $2, ... No query here has a
+// literal ? in it, so a plain scan is enough.
+func (s *Store) q(query string) string {
+	if !s.pg {
+		return query
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range query {
+		if r == '?' {
+			n++
+			b.WriteString("$" + strconv.Itoa(n))
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -55,7 +122,7 @@ func (s *Store) Get(channel, ts string) (*task.Task, error) {
 
 // Open lists a channel's tasks that are not done, oldest message first.
 func (s *Store) Open(channel string) ([]task.Task, error) {
-	return s.query(`WHERE channel = ? AND status != ? ORDER BY CAST(ts AS REAL), ts`, channel, string(task.Done))
+	return s.query(`WHERE channel = ? AND status != ? ORDER BY CAST(ts AS DOUBLE PRECISION), ts`, channel, string(task.Done))
 }
 
 // Save upserts the task and replaces its owner list and checklist ticks.
@@ -65,28 +132,28 @@ func (s *Store) Save(t *task.Task) error {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)
+	_, err = tx.Exec(s.q(`INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (channel, ts) DO UPDATE SET reporter=excluded.reporter, text=excluded.text,
 		permalink=excluded.permalink, card_ts=excluded.card_ts, status=excluded.status,
-		last_activity=excluded.last_activity, reminded_at=excluded.reminded_at`,
+		last_activity=excluded.last_activity, reminded_at=excluded.reminded_at`),
 		t.Channel, t.TS, t.Reporter, t.Text, t.Permalink, t.CardTS, string(t.Status),
 		unix(t.CreatedAt), unix(t.LastActivity), unix(t.RemindedAt))
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM owners WHERE channel = ? AND ts = ?`, t.Channel, t.TS); err != nil {
+	if _, err := tx.Exec(s.q(`DELETE FROM owners WHERE channel = ? AND ts = ?`), t.Channel, t.TS); err != nil {
 		return err
 	}
 	for i, o := range t.Owners {
-		if _, err := tx.Exec(`INSERT INTO owners VALUES (?,?,?,?)`, t.Channel, t.TS, i, o); err != nil {
+		if _, err := tx.Exec(s.q(`INSERT INTO owners VALUES (?,?,?,?)`), t.Channel, t.TS, i, o); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM checks WHERE channel = ? AND ts = ?`, t.Channel, t.TS); err != nil {
+	if _, err := tx.Exec(s.q(`DELETE FROM checks WHERE channel = ? AND ts = ?`), t.Channel, t.TS); err != nil {
 		return err
 	}
 	for k, c := range t.Checks {
-		if _, err := tx.Exec(`INSERT INTO checks VALUES (?,?,?,?)`, t.Channel, t.TS, k, c); err != nil {
+		if _, err := tx.Exec(s.q(`INSERT INTO checks VALUES (?,?,?,?)`), t.Channel, t.TS, k, c); err != nil {
 			return err
 		}
 	}
@@ -94,14 +161,14 @@ func (s *Store) Save(t *task.Task) error {
 }
 
 func (s *Store) Delete(channel, ts string) error {
-	_, err := s.db.Exec(`DELETE FROM tasks WHERE channel = ? AND ts = ?`, channel, ts)
+	_, err := s.db.Exec(s.q(`DELETE FROM tasks WHERE channel = ? AND ts = ?`), channel, ts)
 	return err
 }
 
 // DeleteDone removes a channel's done tasks whose last activity is before cutoff
 // and returns how many went. Owners and checks cascade.
 func (s *Store) DeleteDone(channel string, cutoff time.Time) (int64, error) {
-	r, err := s.db.Exec(`DELETE FROM tasks WHERE channel = ? AND status = ? AND last_activity < ?`,
+	r, err := s.db.Exec(s.q(`DELETE FROM tasks WHERE channel = ? AND status = ? AND last_activity < ?`),
 		channel, string(task.Done), cutoff.Unix())
 	if err != nil {
 		return 0, err
@@ -112,7 +179,7 @@ func (s *Store) DeleteDone(channel string, cutoff time.Time) (int64, error) {
 // KV returns "" when the key is unset.
 func (s *Store) KV(key string) (string, error) {
 	var v string
-	err := s.db.QueryRow(`SELECT value FROM kv WHERE key = ?`, key).Scan(&v)
+	err := s.db.QueryRow(s.q(`SELECT value FROM kv WHERE key = ?`), key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -120,13 +187,13 @@ func (s *Store) KV(key string) (string, error) {
 }
 
 func (s *Store) SetKV(key, value string) error {
-	_, err := s.db.Exec(`INSERT INTO kv VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, value)
+	_, err := s.db.Exec(s.q(`INSERT INTO kv VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`), key, value)
 	return err
 }
 
 func (s *Store) query(where string, args ...any) ([]task.Task, error) {
-	rows, err := s.db.Query(`SELECT channel, ts, reporter, text, permalink, card_ts, status,
-		created_at, last_activity, reminded_at FROM tasks `+where, args...)
+	rows, err := s.db.Query(s.q(`SELECT channel, ts, reporter, text, permalink, card_ts, status,
+		created_at, last_activity, reminded_at FROM tasks `+where), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +225,7 @@ func (s *Store) query(where string, args ...any) ([]task.Task, error) {
 }
 
 func (s *Store) owners(channel, ts string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT user FROM owners WHERE channel = ? AND ts = ? ORDER BY pos`, channel, ts)
+	rows, err := s.db.Query(s.q(`SELECT "user" FROM owners WHERE channel = ? AND ts = ? ORDER BY pos`), channel, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +242,7 @@ func (s *Store) owners(channel, ts string) ([]string, error) {
 }
 
 func (s *Store) checks(channel, ts string) (map[string]bool, error) {
-	rows, err := s.db.Query(`SELECT item, checked FROM checks WHERE channel = ? AND ts = ?`, channel, ts)
+	rows, err := s.db.Query(s.q(`SELECT item, checked FROM checks WHERE channel = ? AND ts = ?`), channel, ts)
 	if err != nil {
 		return nil, err
 	}

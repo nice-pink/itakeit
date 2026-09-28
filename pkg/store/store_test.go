@@ -1,22 +1,55 @@
 package store
 
 import (
+	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/nice-pink/itakeit/pkg/task"
 )
 
-func TestRoundTrip(t *testing.T) {
+func TestRoundTripSQLite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.db")
-	s, err := Open(path)
+	roundTrip(t, func() (*Store, error) { return Open(path) })
+}
+
+// TestRoundTripPostgres runs only when ITAKEIT_TEST_DATABASE_URL points at a
+// Postgres database. Each run gets its own schema, dropped afterwards.
+func TestRoundTripPostgres(t *testing.T) {
+	dsn := os.Getenv("ITAKEIT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ITAKEIT_TEST_DATABASE_URL not set")
+	}
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	schema := fmt.Sprintf("itakeit_test_%d", time.Now().UnixNano())
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	roundTrip(t, func() (*Store, error) { return OpenPostgres(dsn + sep + "search_path=" + schema) })
+}
+
+func roundTrip(t *testing.T, open func() (*Store, error)) {
+	s, err := open()
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1_700_000_000, 0)
 	in := &task.Task{Channel: "C1", TS: "1.1", Reporter: "UR", Text: "broken", Permalink: "https://x",
-		CardTS: "1.2", Status: task.InProgress, Owners: []string{"UB", "UA"}, CreatedAt: now, LastActivity: now}
+		CardTS: "1.2", Status: task.InProgress, Owners: []string{"UB", "UA"}, CreatedAt: now, LastActivity: now,
+		Checks: map[string]bool{"a": true, "b": false}}
 	if err := s.Save(in); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +62,7 @@ func TestRoundTrip(t *testing.T) {
 	s.Save(&task.Task{Channel: "C2", TS: "0.1", CreatedAt: now})
 	s.Close()
 
-	s, err = Open(path)
+	s, err = open()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,12 +72,15 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("get: %v %v", got, err)
 	}
 	if got.Text != "broken" || got.Status != task.InProgress || len(got.Owners) != 1 || got.Owners[0] != "UA" ||
-		!got.CreatedAt.Equal(now) || !got.RemindedAt.IsZero() {
+		!got.CreatedAt.Equal(now) || !got.RemindedAt.IsZero() || len(got.Checks) != 2 || !got.Checks["a"] || got.Checks["b"] {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
-	open, _ := s.Open("C1")
-	if len(open) != 2 || open[0].TS != "0.5" || open[1].TS != "1.1" {
-		t.Fatalf("Open: this channel only, no done tasks, ordered by message ts: %+v", open)
+	list, _ := s.Open("C1")
+	if len(list) != 2 || list[0].TS != "0.5" || list[1].TS != "1.1" {
+		t.Fatalf("Open: this channel only, no done tasks, ordered by message ts: %+v", list)
+	}
+	if n, err := s.DeleteDone("C1", now.Add(time.Second)); n != 1 || err != nil {
+		t.Fatalf("DeleteDone: %d %v", n, err)
 	}
 	if missing, err := s.Get("C1", "9.9"); missing != nil || err != nil {
 		t.Fatalf("missing task: %v %v", missing, err)

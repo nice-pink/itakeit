@@ -12,7 +12,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DBPath != "itakeit.db" || c.StaleAfterHours != 48 || c.BoardMaxTasks != 50 || c.DoneRetainDays != 30 {
+	if c.DBPath != "itakeit.db" || c.DatabaseURL != "" || c.StaleAfterHours != 48 || c.BoardMaxTasks != 50 || c.DoneRetainDays != 30 {
 		t.Fatalf("defaults not applied: %+v", c)
 	}
 	if a, ok := c.Action("raising_hand::skin-tone-4"); !ok || a != task.Claim {
@@ -20,6 +20,13 @@ func TestDefaults(t *testing.T) {
 	}
 	if _, ok := c.Action("thumbsup"); ok {
 		t.Fatal("unmapped emoji must not resolve")
+	}
+}
+
+func TestDatabaseURL(t *testing.T) {
+	c, err := Parse([]byte("channel: C1\ndatabase_url: postgres://u:p@h/db"))
+	if err != nil || c.DatabaseURL != "postgres://u:p@h/db" {
+		t.Fatalf("database_url not read: %+v %v", c, err)
 	}
 }
 

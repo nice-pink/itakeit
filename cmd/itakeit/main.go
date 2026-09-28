@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nice-pink/itakeit/pkg/bot"
 	"github.com/nice-pink/itakeit/pkg/config"
 	"github.com/nice-pink/itakeit/pkg/store"
@@ -40,7 +41,7 @@ func run(cfgPath string, debug bool) error {
 		return errMissingTokens
 	}
 
-	st, err := store.Open(cfg.DBPath)
+	st, err := openStore(cfg)
 	if err != nil {
 		return err
 	}
@@ -58,6 +59,28 @@ func run(cfgPath string, debug bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return bot.New(api, st, cfg, auth.UserID, auth.BotID).Run(ctx, sm)
+}
+
+// openStore uses Postgres when ITAKEIT_DATABASE_URL or database_url is set, the
+// environment winning so a secret injected at deploy time overrides the file,
+// and the SQLite file at db_path otherwise. The variable is prefixed because a
+// shared env file often carries another service's DATABASE_URL, and the bot
+// would silently use it. Fields the URL leaves out still fall back to libpq's
+// PG* variables and ~/.pgpass, as pgx always does. Whitespace is trimmed
+// because secret files often end in a newline.
+func openStore(cfg *config.Config) (*store.Store, error) {
+	dsn, from := strings.TrimSpace(os.Getenv("ITAKEIT_DATABASE_URL")), "env"
+	if dsn == "" {
+		dsn, from = strings.TrimSpace(cfg.DatabaseURL), "config"
+	}
+	if dsn != "" {
+		if c, err := pgx.ParseConfig(dsn); err == nil {
+			slog.Info("using postgres", "from", from, "host", c.Host, "port", c.Port, "database", c.Database)
+		}
+		return store.OpenPostgres(dsn)
+	}
+	slog.Info("using sqlite", "path", cfg.DBPath)
+	return store.Open(cfg.DBPath)
 }
 
 var errMissingTokens = errors.New("set SLACK_BOT_TOKEN (xoxb-...) and SLACK_APP_TOKEN (xapp-...)")

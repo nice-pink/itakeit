@@ -2,7 +2,9 @@
   import manifest from '../../slack-app-manifest.yaml?raw'
   import Code from './lib/Code.svelte'
   import Demo from './lib/Demo.svelte'
-  import { image, repo } from './lib/site'
+  import Emojify from './lib/Emojify.svelte'
+  import RaiseHand from './lib/RaiseHand.svelte'
+  import { agentPage, image, repo } from './lib/site'
 
   const features = [
     { icon: '📝', title: 'Every message is a task', text: 'Post an issue in the channel. The bot replies in its thread with a status card.' },
@@ -65,7 +67,7 @@ volumes:
     <div class="pitch">
       <img class="turtle" src="./turtle.png" alt="itakeit pixel turtle" width="400" height="259" />
       <h1>Task tracking in Slack threads. <span>Dead simple.</span></h1>
-      <p class="lead"><b>itakeit</b> turns every message in one Slack channel into a task. People take it with 🙋, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
+      <p class="lead"><b>itakeit</b> turns every message in one Slack channel into a task. People take it with <RaiseHand />, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
       <div class="cta">
         <a class="btn" href="#setup">Set it up</a>
         <a class="btn ghost" href={repo}>View on GitHub</a>
@@ -85,9 +87,9 @@ volumes:
       <div class="grid">
         {#each features as f (f.title)}
           <article class="card">
-            <div class="icon">{f.icon}</div>
+            <div class="icon"><Emojify text={f.icon} /></div>
             <h3>{f.title}</h3>
-            <p>{f.text}</p>
+            <p><Emojify text={f.text} /></p>
           </article>
         {/each}
       </div>
@@ -133,7 +135,7 @@ volumes:
           <p>Put the tokens in a <code>.env</code> file next to it and run <code>docker compose up -d</code>.</p>
           <Code code={compose} label="compose.yaml" />
         </details>
-        <p>The log shows <code>authenticated</code> and <code>connected to slack</code>, and a board appears pinned in the channel. Post a message and react 🙋.</p>
+        <p>The log shows <code>authenticated</code> and <code>connected to slack</code>, and a board appears pinned in the channel. Post a message and react <RaiseHand />.</p>
       </li>
     </ol>
 
@@ -151,10 +153,13 @@ volumes:
           <thead><tr><th>Who</th><th>Does</th><th>Effect</th></tr></thead>
           <tbody>
             {#each usage as [who, does, effect] (does)}
-              <tr><td>{who}</td><td>{does}</td><td>{effect}</td></tr>
+              <tr><td>{who}</td><td><Emojify text={does} /></td><td><Emojify text={effect} /></td></tr>
             {/each}
           </tbody>
         </table>
+      </div>
+      <div class="note agent">
+        <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in the channel with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
       </div>
     </div>
   </section>
@@ -215,6 +220,7 @@ volumes:
   .steps > li { min-width: 0; }
   details { margin: 0.4rem 0 0.8rem; }
   summary { cursor: pointer; font-weight: 600; color: var(--green-dark); }
+  .note.agent { margin-top: 1.5rem; }
   .note { max-width: 820px; background: #fff3e6; border: 2px solid var(--ink); border-left: 8px solid var(--orange); padding: 1rem 1.2rem; }
 
   .table { overflow-x: auto; background: var(--panel); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); }

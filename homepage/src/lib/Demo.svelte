@@ -1,4 +1,7 @@
 <script lang="ts">
+  import Emojify from './Emojify.svelte'
+  import RaiseHand from './RaiseHand.svelte'
+
   type Status = 'investigating' | 'in_progress' | 'needs_info' | 'blocked' | 'done'
 
   const statuses: { key: Status; emoji: string; label: string }[] = [
@@ -59,20 +62,20 @@
       <div class="meta"><b>Maya</b> <span>10:42</span></div>
       <p>Checkout returns 500 for EU cards since this morning's deploy.</p>
       <div class="reactions">
-        <button type="button" class:on={claimed} aria-pressed={claimed} onclick={claim} title="take it">🙋 <small>{claimed ? 1 : 0}</small></button>
+        <button type="button" class:on={claimed} aria-pressed={claimed} onclick={claim} title="take it"><RaiseHand size="1.15em" /> <small>{claimed ? 1 : 0}</small></button>
         {#each statuses as s (s.key)}
           <button type="button" class:on={reacted.includes(s.key)} aria-pressed={reacted.includes(s.key)} onclick={() => react(s.key)} title={s.label}>{s.emoji} <small>{reacted.includes(s.key) ? 1 : 0}</small></button>
         {/each}
       </div>
-      <div aria-live="polite">{#if hint}<p class="hint">Only visible to you: {hint}</p>{/if}</div>
+      <div aria-live="polite">{#if hint}<p class="hint">Only visible to you: <Emojify text={hint} /></p>{/if}</div>
 
       <div class="thread">
         <div class="msg">
           <div class="avatar bot"><img src="./turtle.png" alt="" /></div>
           <div class="body">
             <div class="meta"><b>itakeit</b> <span class="app">APP</span></div>
-            <p aria-live="polite"><b>Status:</b> {label}<br /><b>Owners:</b> {claimed ? '@you' : 'nobody yet'}</p>
-            <p class="legend">React on the message above: 🙋 take it · 👀 investigating · 🚧 in progress · ❓ needs info · ⛔ blocked · ✅ done. Status reactions count from owners only.</p>
+            <p aria-live="polite"><b>Status:</b> <Emojify text={label} /><br /><b>Owners:</b> {claimed ? '@you' : 'nobody yet'}</p>
+            <p class="legend">React on the message above: <RaiseHand /> take it · 👀 investigating · 🚧 in progress · ❓ needs info · ⛔ blocked · ✅ done. Status reactions count from owners only.</p>
           </div>
         </div>
         {#if status === 'needs_info'}
@@ -93,7 +96,7 @@
     {#if status === 'done'}
       <p>I take it: 0 open. Nothing open. 🎉</p>
     {:else}
-      <p><b>I take it: 1 open</b><br />{label.replace(' ', ' 1 ')}<br />• {label} &nbsp;Checkout returns 500 for EU cards… · {claimed ? '@you' : 'unclaimed'}</p>
+      <p><b>I take it: 1 open</b><br /><Emojify text={label.replace(' ', ' 1 ')} /><br />• <Emojify text={label} /> &nbsp;Checkout returns 500 for EU cards… · {claimed ? '@you' : 'unclaimed'}</p>
     {/if}
   </div>
 </div>

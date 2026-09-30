@@ -161,7 +161,7 @@ volumes:
         </table>
       </div>
       <div class="note agent">
-        <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in one itakeit channel with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
+        <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in the channels itakeit serves with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
       </div>
     </div>
   </section>

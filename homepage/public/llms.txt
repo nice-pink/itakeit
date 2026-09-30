@@ -25,7 +25,7 @@ itakeit runs as one Docker container with a SQLite file, or with Postgres when I
 
 ## Related
 
-- itakeit-agent (https://github.com/nice-pink/itakeit-agent), also by nice-pink: a separate Slack app that claims tasks in one itakeit channel (set with channel: in its config) with 🙋, asks for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers the operator allows, and writes can require an approver's reaction.
+- itakeit-agent (https://github.com/nice-pink/itakeit-agent), also by nice-pink: a separate Slack app that claims tasks in the channels itakeit serves (the same channels list, or with auto_channels every channel it is invited to) with 🙋, asks for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers the operator allows, and writes can require an approver's reaction.
 - Betimation (https://betimation.com), also by nice-pink: advanced and fun team task tracking. Projects and goals race on a live racetrack as tasks close, and the team bets on who finishes first. It has a Slack app too.
 
 ## Links

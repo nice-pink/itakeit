@@ -7,8 +7,9 @@
 # Instead of channels: serve every public or private channel the bot is a member of.
 # Inviting the bot then makes a channel a task channel, and removing it stops the bot
 # there. Needs the channels:read and groups:read scopes from the current manifest.
-# A `channel:` key next to it is ignored, so a config shared with itakeit-agent can
-# keep the agent's channel.
+# A `channel:` key next to it is ignored, so a config shared with an older
+# itakeit-agent can keep its channel. itakeit-agent reads the same channels and
+# auto_channels keys.
 auto_channels: true
 
 # SQLite file holding owners, statuses and the board message timestamp. Ignored when

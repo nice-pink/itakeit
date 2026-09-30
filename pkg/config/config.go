@@ -18,8 +18,8 @@ type Config struct {
 	// The older single `channel` key is still read and becomes a one-item list.
 	Channels []string `yaml:"channels"`
 	// LegacyChannel is folded into Channels by Parse, except under auto_channels,
-	// where it is kept but ignored: itakeit-agent reads `channel` from the same
-	// file and refuses to start without it.
+	// where it is kept but ignored: a file shared with an itakeit-agent from
+	// before it read channels and auto_channels still sets `channel` for it.
 	LegacyChannel string `yaml:"channel"`
 	// AutoChannels serves every channel the bot is a member of instead of a list.
 	AutoChannels    bool                     `yaml:"auto_channels"`

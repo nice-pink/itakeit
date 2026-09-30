@@ -42,7 +42,7 @@ func TestAutoChannels(t *testing.T) {
 	if err != nil || !c.AutoChannels || len(c.Channels) != 0 || c.Serves("C1") {
 		t.Fatalf("auto_channels needs no list and serves nothing by itself: %+v %v", c, err)
 	}
-	// itakeit-agent shares the file and needs channel, so auto mode keeps and ignores it.
+	// An older itakeit-agent sharing the file needs channel, so auto mode keeps and ignores it.
 	c, err = Parse([]byte("auto_channels: true\nchannel: C1"))
 	if err != nil || len(c.Channels) != 0 || c.Serves("C1") || c.LegacyChannel != "C1" {
 		t.Fatalf("channel must be kept but ignored under auto_channels: %+v %v", c, err)

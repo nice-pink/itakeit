@@ -37,7 +37,7 @@ func run(cfgPath string, debug bool) error {
 		return err
 	}
 	if cfg.AutoChannels && cfg.LegacyChannel != "" {
-		slog.Warn("channel is ignored under auto_channels (it is kept for itakeit-agent)", "channel", cfg.LegacyChannel)
+		slog.Warn("channel is ignored under auto_channels (kept for older itakeit-agent versions)", "channel", cfg.LegacyChannel)
 	}
 	botToken, appToken := os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN")
 	if !strings.HasPrefix(botToken, "xoxb-") || !strings.HasPrefix(appToken, "xapp-") {

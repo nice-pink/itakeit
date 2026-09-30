@@ -1,0 +1,41 @@
+# Local itakeit with Postgres, built from this checkout.
+#   cp .env.example .env    # fill in the Slack tokens
+#   docker compose up --build
+# For SQLite instead, delete the postgres service and the itakeit service's
+# environment and depends_on blocks; config.yaml already points db_path at the
+# data volume.
+name: itakeit
+services:
+  itakeit:
+    build: ../..
+    restart: unless-stopped
+    # Tokens come from .env through env_file, not ${VAR} interpolation, which would
+    # let tokens exported in the shell win over the file.
+    env_file: .env
+    environment:
+      ITAKEIT_DATABASE_URL: postgres://itakeit:itakeit@postgres:5432/itakeit?sslmode=disable
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - itakeit-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: itakeit
+      POSTGRES_PASSWORD: itakeit
+      POSTGRES_DB: itakeit
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U itakeit -d itakeit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  itakeit-data:
+  postgres-data:

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: itakeit
+  labels:
+    app: itakeit
+spec:
+  # One instance per Slack app: Slack delivers each Socket Mode event to only one
+  # open connection, so a second replica, even with its own database, misses events.
+  # Recreate stops the old pod before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: itakeit
+  template:
+    metadata:
+      labels:
+        app: itakeit
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: itakeit
+          image: ghcr.io/nice-pink/itakeit:latest
+          # Socket Mode makes only outbound connections: no ports, service or ingress.
+          env:
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-slack
+                  key: SLACK_BOT_TOKEN
+            - name: SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-slack
+                  key: SLACK_APP_TOKEN
+            - name: ITAKEIT_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-postgres
+                  key: password
+            # $(VAR) expands only variables defined above it. The password must be
+            # URL-safe (openssl rand -hex gives one).
+            - name: ITAKEIT_DATABASE_URL
+              value: postgres://itakeit:$(ITAKEIT_PG_PASSWORD)@itakeit-postgres:5432/itakeit?sslmode=disable
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: config
+          configMap:
+            name: itakeit-config

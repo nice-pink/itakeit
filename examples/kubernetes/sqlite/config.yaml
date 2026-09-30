@@ -1,0 +1,9 @@
+# Settings shared by every channel. Full reference: config.example.yaml in the repo root.
+# Serve every channel the bot is invited to. Or list IDs instead:
+# channels: [C0123456789]
+auto_channels: true
+db_path: /data/itakeit.db
+stale_after_hours: 48
+board_max_tasks: 50
+done_retain_days: 30
+status_claims: false

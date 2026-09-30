@@ -2,7 +2,7 @@ bin/
 *.db
 *.db-shm
 *.db-wal
-config.yaml
+/config.yaml
 .env
 cover.out
 

@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: itakeit
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - deployment.yaml
+# The name gets a content hash, so editing config.yaml rolls the pod.
+configMapGenerator:
+  - name: itakeit-config
+    files:
+      - config.yaml

@@ -85,6 +85,8 @@ docker build -t itakeit . && docker run -d --name itakeit --restart unless-stopp
 
 With SQLite, set `db_path: /data/itakeit.db` in `config.yaml` so state survives container restarts. The runtime image runs as uid 65532 and creates `/data` owned by that user, so the named volume above is writable. If you bind-mount a host directory instead, make it writable for uid 65532. The bot makes only outbound connections, so it needs no port.
 
+`examples/` has a Docker Compose setup with Postgres and Kubernetes manifests for SQLite and for Postgres; see `examples/README.md`.
+
 ### Postgres
 
 Set `ITAKEIT_DATABASE_URL` to use Postgres instead of SQLite, for example `ITAKEIT_DATABASE_URL=postgres://itakeit:secret@db:5432/itakeit` (add `-e ITAKEIT_DATABASE_URL` to `docker run`), or set `database_url` in `config.yaml`. The environment variable wins when both are set; prefer it, because the URL holds the password. `db_path` is then ignored. Connecting times out after 10 s unless the URL sets a non-zero `connect_timeout`. Fields the URL leaves out (host, user, password, `sslmode`) fall back to the standard `PG*` environment variables and `~/.pgpass`, so give the full URL when the environment carries another service's. The bot creates its tables on start (`tasks`, `owners`, `checks`, `kv`). These names are generic, so give it its own database, or its own schema: run `CREATE SCHEMA itakeit` first and add `search_path=itakeit` to the URL's query string. Existing SQLite data is not copied over; the bot starts empty and tasks come back as people react.

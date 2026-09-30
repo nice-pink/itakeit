@@ -4,6 +4,7 @@ bin/
 *.db-wal
 config.yaml
 .env
+**/.env
 cover.out
 .git
 homepage/

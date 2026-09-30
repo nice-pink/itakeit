@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: itakeit
+  labels:
+    app: itakeit
+spec:
+  # One instance per Slack app: Slack delivers each Socket Mode event to only one
+  # open connection, so a second replica, even with its own database, misses events.
+  # Recreate also releases the ReadWriteOnce volume before the new pod mounts it.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: itakeit
+  template:
+    metadata:
+      labels:
+        app: itakeit
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        # Makes the volume writable for the image's uid 65532.
+        fsGroup: 65532
+      containers:
+        - name: itakeit
+          image: ghcr.io/nice-pink/itakeit:latest
+          # Socket Mode makes only outbound connections: no ports, service or ingress.
+          env:
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-slack
+                  key: SLACK_BOT_TOKEN
+            - name: SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-slack
+                  key: SLACK_APP_TOKEN
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+            # SQLite spills large sorts to temp files, and the root filesystem is read-only.
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: config
+          configMap:
+            name: itakeit-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: itakeit-data
+        - name: tmp
+          emptyDir: {}

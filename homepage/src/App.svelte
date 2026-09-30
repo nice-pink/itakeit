@@ -7,14 +7,14 @@
   import { agentPage, image, repo } from './lib/site'
 
   const features = [
-    { icon: '📝', title: 'Every message is a task', text: 'Post an issue in a task channel. The bot replies in its thread with a status card.' },
-    { icon: '🙋', title: 'Claim with one reaction', text: 'React 🙋 to take it. Several people can own a task. Remove the reaction to hand it back.' },
-    { icon: '🚧', title: 'Status by emoji', text: 'Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.' },
-    { icon: '❓', title: 'Ask the reporter', text: '❓ pings the reporter in the thread. Their reply pings the owners and clears the status.' },
-    { icon: '☑️', title: 'Checklists', text: 'Lines written as [ ] item in the issue become checkboxes on the status card. Anyone can tick them.' },
-    { icon: '📌', title: 'A pinned board', text: 'A pinned message in each channel counts the open tasks in each status and lists the oldest with their owners, always current.' },
-    { icon: '🔓', title: 'Status without claiming', text: 'Optional: with status_claims on, any status reaction makes you an owner, no 🙋 needed first.' },
-    { icon: '⏰', title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
+    { title: 'Every message is a task', text: 'Post an issue in a task channel. The bot replies in its thread with a status card.' },
+    { title: 'Claim with one reaction', text: 'React 🙋 to take it. Several people can own a task. Remove the reaction to hand it back.' },
+    { title: 'Status by emoji', text: 'Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.' },
+    { title: 'Ask the reporter', text: '❓ pings the reporter in the thread. Their reply pings the owners and clears the status.' },
+    { title: 'Checklists', text: 'Lines written as [ ] item in the issue become checkboxes on the status card. Anyone can tick them.' },
+    { title: 'A pinned board', text: 'A pinned message in each channel counts the open tasks in each status and lists the oldest with their owners, always current.' },
+    { title: 'Status without claiming', text: 'Optional: with status_claims on, any status reaction makes you an owner, no 🙋 needed first.' },
+    { title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
   ]
 
   const config = `auto_channels: true\ndb_path: /data/itakeit.db`
@@ -89,7 +89,6 @@ volumes:
       <div class="grid">
         {#each features as f (f.title)}
           <article class="card">
-            <div class="icon"><Emojify text={f.icon} /></div>
             <h3>{f.title}</h3>
             <p><Emojify text={f.text} /></p>
           </article>
@@ -210,7 +209,6 @@ volumes:
   .card { background: var(--panel); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 1.2rem 1.3rem; }
   .card h3 { margin: 0.4rem 0 0.3rem; font-size: 1.1rem; }
   .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-  .icon { font-size: 1.7rem; }
 
   .setup { padding-top: 4rem; padding-bottom: 4rem; }
   .steps { list-style: none; counter-reset: step; padding: 0; margin: 0; max-width: 820px; }

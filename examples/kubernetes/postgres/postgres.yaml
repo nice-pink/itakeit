@@ -1,0 +1,71 @@
+# A minimal single-instance Postgres for the bot. Point ITAKEIT_DATABASE_URL in
+# deployment.yaml at a managed or operator-run database instead and drop this file
+# from kustomization.yaml if you have one. The container starts as root (the
+# entrypoint chowns PGDATA, then drops to postgres), so the namespace needs the
+# "baseline" Pod Security level, not "restricted".
+apiVersion: v1
+kind: Service
+metadata:
+  name: itakeit-postgres
+spec:
+  clusterIP: None
+  selector:
+    app: itakeit-postgres
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: itakeit-postgres
+spec:
+  serviceName: itakeit-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: itakeit-postgres
+  template:
+    metadata:
+      labels:
+        app: itakeit-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - name: POSTGRES_USER
+              value: itakeit
+            - name: POSTGRES_DB
+              value: itakeit
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: itakeit-postgres
+                  key: password
+            # A subdirectory, because the volume root holds lost+found on many
+            # storage classes and initdb refuses a non-empty directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, itakeit, -d, itakeit]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

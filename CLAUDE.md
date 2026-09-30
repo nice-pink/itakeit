@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-itakeit is a Slack bot (Go, Socket Mode, SQLite via pure-Go `modernc.org/sqlite`, or Postgres via `pgx` when `ITAKEIT_DATABASE_URL` or config `database_url` is set (env wins), no cgo) that turns top-level messages in one channel into tasks claimed and status-tracked with reactions. User-facing behaviour and setup are in `README.md`; keep its Usage table in sync when behaviour changes.
+itakeit is a Slack bot (Go, Socket Mode, SQLite via pure-Go `modernc.org/sqlite`, or Postgres via `pgx` when `ITAKEIT_DATABASE_URL` or config `database_url` is set (env wins), no cgo) that turns top-level messages in its configured channels (`channels`, shared settings) into tasks claimed and status-tracked with reactions. User-facing behaviour and setup are in `README.md`; keep its Usage table in sync when behaviour changes.
 
 ## Reactions are the interface
 
@@ -29,10 +29,11 @@ Gotchas:
 - The board is posted as a placeholder and then filled by `UpdateMessage`, because a fresh post would notify every mentioned owner. Keep it that way.
 - Cards and the board self-heal: an `UpdateMessage` error whose text is exactly `message_not_found` triggers a repost; any other error is only logged.
 - A deleted task message arrives as `message_changed` with a `tombstone` subtype (it has the card as a reply), not as `message_deleted`. Both paths call `onDelete`.
+- Every task, board and store call is keyed by the event's channel; never fall back to a default channel. The legacy `channel` key is folded into `Channels` by `config.Parse`.
 - Reactions count only on the root task message, and the bot ignores its own messages by both user ID and bot ID. Skin-tone suffixes (`::skin-tone-N`) are stripped in `config.Action`.
 - A present `emoji` block in config replaces the defaults entirely; `claim` is required and an emoji may map to only one action.
 - Checklist items come from the task text; card ticks live in the `checks` table keyed by a hash of item text plus occurrence. Each item is its own single-option checkbox element (block ID `check:<ts>:<key>`), because a checkbox click reports the whole ticked set of its element and a multi-option group would let a stale view untick other people's items. Keep it one item per element. If Slack rejects the blocks (`invalid_blocks`), the card falls back to text only; other errors do not.
 
 ## Tests
 
-Bot tests drive `Bot.Handle` with synthetic `slackevents` against `fakeAPI` (records calls, hands out sequential `900.N` timestamps, `missing` simulates deleted messages) and a temp SQLite file. Use `setup(t)`, `msg(...)` and `react(...)`; control time by overriding `b.now`.
+Bot tests drive `Bot.Handle` with synthetic `slackevents` against `fakeAPI` (records calls, hands out sequential `900.N` timestamps, `missing` simulates deleted messages, and any edit, delete or pin of a bot message outside the channel it was posted in fails the test) and a temp SQLite file. `setup(t)` serves channels `ch` and `ch2`; use `msg(...)` (sets `ch` unless the event names a channel), `react(...)` or `reactIn(channel, ...)`; control time by overriding `b.now`.

@@ -16,7 +16,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 )
 
-const ch = "CTASKS001"
+const ch, ch2 = "CTASKS001", "CTASKS002"
 
 type call struct{ kind, channel, ts, thread, user, text string }
 
@@ -29,6 +29,15 @@ type fakeAPI struct {
 	errs    []string                        // errors the next UpdateMessage calls return, in order
 	held    map[string][]slack.ItemReaction // reactions.get result by message ts
 	heldErr error
+	posted  map[string]string // channel of every message the bot posted, by ts
+	wrong   []string          // calls that named a message in the wrong channel
+}
+
+// at records a call on message ts in channel c that the bot posted elsewhere.
+func (f *fakeAPI) at(kind, c, ts string) {
+	if p, ok := f.posted[ts]; ok && p != c {
+		f.wrong = append(f.wrong, fmt.Sprintf("%s %s in %s, posted in %s", kind, ts, c, p))
+	}
 }
 
 func decode(opts []slack.MsgOption) (text, thread string) {
@@ -41,11 +50,13 @@ func (f *fakeAPI) next() string { f.seq++; return fmt.Sprintf("900.%d", f.seq) }
 func (f *fakeAPI) PostMessage(c string, o ...slack.MsgOption) (string, string, error) {
 	text, thread := decode(o)
 	ts := f.next()
+	f.posted[ts] = c
 	f.calls = append(f.calls, call{kind: "post", channel: c, ts: ts, thread: thread, text: text})
 	return c, ts, nil
 }
 
 func (f *fakeAPI) UpdateMessage(c, ts string, o ...slack.MsgOption) (string, string, string, error) {
+	f.at("update", c, ts)
 	if f.missing[ts] {
 		return "", "", "", slack.SlackErrorResponse{Err: "message_not_found"}
 	}
@@ -60,6 +71,7 @@ func (f *fakeAPI) UpdateMessage(c, ts string, o ...slack.MsgOption) (string, str
 }
 
 func (f *fakeAPI) DeleteMessage(c, ts string) (string, string, error) {
+	f.at("delete", c, ts)
 	f.calls = append(f.calls, call{kind: "delete", channel: c, ts: ts})
 	return c, ts, nil
 }
@@ -76,18 +88,22 @@ func (f *fakeAPI) GetPermalink(p *slack.PermalinkParameters) (string, error) {
 
 func (f *fakeAPI) GetConversationHistory(p *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error) {
 	r := &slack.GetConversationHistoryResponse{}
-	if m, ok := f.history[p.Latest]; ok {
+	// A history entry that names its channel is found only in that channel.
+	if m, ok := f.history[p.Latest]; ok && (m.Channel == "" || m.Channel == p.ChannelID) {
 		r.Messages = []slack.Message{m}
 	}
 	return r, nil
 }
 
 func (f *fakeAPI) AddPin(c string, item slack.ItemRef) error {
+	f.at("pin", c, item.Timestamp)
+	f.at("pin item", item.Channel, item.Timestamp)
 	f.calls = append(f.calls, call{kind: "pin", channel: c, ts: item.Timestamp})
 	return nil
 }
 
 func (f *fakeAPI) GetReactions(item slack.ItemRef, _ slack.GetReactionsParameters) (slack.ReactedItem, error) {
+	f.calls = append(f.calls, call{kind: "reactions", channel: item.Channel, ts: item.Timestamp})
 	return slack.ReactedItem{Reactions: f.held[item.Timestamp]}, f.heldErr
 }
 
@@ -102,9 +118,19 @@ func (f *fakeAPI) find(kind, contains string) *call {
 	return nil
 }
 
+// updated reports whether message ts in channel was edited to contain text.
+func (f *fakeAPI) updated(channel, ts, text string) bool {
+	for _, c := range f.calls {
+		if c.kind == "update" && c.channel == channel && c.ts == ts && strings.Contains(c.text, text) {
+			return true
+		}
+	}
+	return false
+}
+
 func setup(t *testing.T) (*Bot, *fakeAPI, *store.Store) {
 	t.Helper()
-	cfg, err := config.Parse([]byte("channel: " + ch + "\nstale_after_hours: 24\ndone_retain_days: -1"))
+	cfg, err := config.Parse([]byte("channels: [" + ch + ", " + ch2 + "]\nstale_after_hours: 24\ndone_retain_days: -1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,20 +139,32 @@ func setup(t *testing.T) (*Bot, *fakeAPI, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	f := &fakeAPI{history: map[string]slack.Message{}, missing: map[string]bool{}}
+	f := &fakeAPI{history: map[string]slack.Message{}, missing: map[string]bool{}, posted: map[string]string{}}
+	t.Cleanup(func() {
+		for _, w := range f.wrong {
+			t.Error(w)
+		}
+	})
 	b := New(f, st, cfg, "UBOT00001", "BBOT00001")
 	now := time.Unix(1_700_000_000, 0)
 	b.now = func() time.Time { return now }
 	return b, f, st
 }
 
+// msg wraps a message event, in ch unless the event names another channel.
 func msg(ev *slackevents.MessageEvent) slackevents.EventsAPIEvent {
-	ev.Channel = ch
+	if ev.Channel == "" {
+		ev.Channel = ch
+	}
 	return slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: ev}}
 }
 
 func react(user, emoji, ts string, added bool) slackevents.EventsAPIEvent {
-	item := slackevents.Item{Type: "message", Channel: ch, Timestamp: ts}
+	return reactIn(ch, user, emoji, ts, added)
+}
+
+func reactIn(channel, user, emoji, ts string, added bool) slackevents.EventsAPIEvent {
+	item := slackevents.Item{Type: "message", Channel: channel, Timestamp: ts}
 	var data any = &slackevents.ReactionAddedEvent{User: user, Reaction: emoji, Item: item}
 	if !added {
 		data = &slackevents.ReactionRemovedEvent{User: user, Reaction: emoji, Item: item}
@@ -221,11 +259,11 @@ func TestAdoptEditDelete(t *testing.T) {
 
 func TestBoardRepostedWhenDeleted(t *testing.T) {
 	b, f, st := setup(t)
-	b.refreshBoard()
+	b.refreshBoard(ch)
 	old, _ := st.KV(boardKey(ch))
 	f.missing[old] = true
 	f.reset()
-	b.refreshBoard()
+	b.refreshBoard(ch)
 	now, _ := st.KV(boardKey(ch))
 	if now == old || f.find("pin", "") == nil {
 		t.Fatalf("a deleted board should be reposted and pinned, calls: %+v", f.calls)
@@ -339,6 +377,203 @@ func TestSweepDone(t *testing.T) {
 	b.sweepDone()
 	if tk, _ := st.Get(ch, "100.3"); tk == nil {
 		t.Fatal("done_retain_days -1 must keep done tasks")
+	}
+}
+
+func TestChannelsAreSeparate(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.1", Text: "api down"}))
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, User: "UREPORT02", TimeStamp: "100.1", Text: "printer jammed"}))
+	if ts, _ := st.KV(boardKey(ch2)); ts == "" {
+		t.Fatal("a new task must post its own channel's board")
+	}
+	b.Handle(reactIn(ch2, "UBOB00001", "raising_hand", "100.1", true))
+	boardB, _ := st.KV(boardKey(ch2))
+	if !f.updated(ch2, boardB, "<@UBOB00001>") {
+		t.Fatalf("a claim in ch2 must refresh ch2's board, calls: %+v", f.calls)
+	}
+
+	a, _ := st.Get(ch, "100.1")
+	c, _ := st.Get(ch2, "100.1")
+	if a == nil || c == nil || a.Text != "api down" || c.Text != "printer jammed" {
+		t.Fatalf("same ts in two channels must be two tasks, got %+v and %+v", a, c)
+	}
+	if !strings.Contains(c.Permalink, ch2) {
+		t.Fatalf("the permalink must point into the task's channel: %q", c.Permalink)
+	}
+	if len(a.Owners) != 0 || !c.IsOwner("UBOB00001") {
+		t.Fatalf("a claim in one channel must not touch the other, got %+v and %+v", a, c)
+	}
+	boardA, _ := st.KV(boardKey(ch))
+	if boardA == "" || boardB == "" || boardA == boardB {
+		t.Fatalf("each channel needs its own board, got %q and %q", boardA, boardB)
+	}
+	// The last edit of each board is its current content.
+	b.refreshBoards()
+	var textA, textB string
+	for _, cl := range f.calls {
+		switch {
+		case cl.kind == "update" && cl.ts == boardA && cl.channel == ch:
+			textA = cl.text
+		case cl.kind == "update" && cl.ts == boardB && cl.channel == ch2:
+			textB = cl.text
+		case cl.kind == "update" && (cl.ts == boardA || cl.ts == boardB):
+			t.Fatalf("a board edit went to the wrong channel: %+v", cl)
+		}
+	}
+	if !strings.Contains(textA, "api down") || strings.Contains(textA, "printer") ||
+		!strings.Contains(textB, "printer") || strings.Contains(textB, "api down") {
+		t.Fatalf("each board must list only its channel's tasks, got %q and %q", textA, textB)
+	}
+	pins := map[string]bool{}
+	for _, cl := range f.calls {
+		if cl.kind == "pin" {
+			pins[cl.channel+"/"+cl.ts] = true
+		}
+		if cl.kind == "post" && cl.thread == "100.1" && strings.Contains(cl.text, "unclaimed") && cl.channel != ch && cl.channel != ch2 {
+			t.Fatalf("card posted outside the task channels: %+v", cl)
+		}
+	}
+	if !pins[ch+"/"+boardA] || !pins[ch2+"/"+boardB] {
+		t.Fatalf("each board must be pinned in its own channel, pins: %v", pins)
+	}
+
+	f.history["200.1"] = slack.Message{Msg: slack.Msg{Channel: "COTHER001", User: "UREPORT01", Timestamp: "200.1", Text: "chatter"}}
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: "COTHER001", User: "UREPORT01", TimeStamp: "200.1", Text: "chatter"}))
+	b.Handle(reactIn("COTHER001", "UBOB00001", "raising_hand", "200.1", true))
+	other := &task.Task{Channel: "COTHER001", TS: "200.2", Reporter: "UREPORT01", Text: "x\n[ ] a"}
+	st.Save(other)
+	cb := tick("UBOB00001", "check:200.2:"+other.Checklist()[0].Key, other.Checklist()[0].Key)
+	cb.Channel.ID = "COTHER001"
+	b.HandleInteraction(cb)
+	if len(f.calls) != 0 {
+		t.Fatalf("an unlisted channel must be ignored, calls: %+v", f.calls)
+	}
+
+	// Every handler must act on the event's channel. Each step below uses a ts that
+	// also exists in ch, so falling back to one channel fails the check.
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.2", Text: "x\n[ ] a"}))
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, User: "UREPORT02", TimeStamp: "100.2", Text: "x\n[ ] a"}))
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREPORT01", TimeStamp: "100.3", Text: "gone soon"}))
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, User: "UREPORT02", TimeStamp: "100.3", Text: "gone soon"}))
+
+	f.history["300.1"] = slack.Message{Msg: slack.Msg{Channel: ch2, User: "UOLD00001", Timestamp: "300.1", Text: "old"}}
+	b.Handle(reactIn(ch2, "UBOB00001", "raising_hand", "300.1", true))
+	if tk, _ := st.Get(ch2, "300.1"); tk == nil {
+		t.Fatal("adopt must look up history in the reacted channel")
+	}
+
+	f.reset()
+	b.Handle(reactIn(ch2, "UMALLORY1", "white_check_mark", "100.1", true))
+	if c := f.find("ephemeral", "Only owners"); c == nil || c.channel != ch2 {
+		t.Fatalf("the owner hint must go to the reacted channel, calls: %+v", f.calls)
+	}
+
+	b.Handle(reactIn(ch2, "UBOB00001", "question", "100.1", true))
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, User: "UREPORT02", TimeStamp: "100.9", ThreadTimeStamp: "100.1", Text: "more"}))
+	if c := f.find("post", "<@UBOB00001>: <@UREPORT02> added details"); c == nil || c.channel != ch2 {
+		t.Fatalf("a reply must reach the task in its own channel, calls: %+v", f.calls)
+	}
+	if !f.updated(ch2, boardB, "claimed") {
+		t.Fatalf("a reply in ch2 must refresh ch2's board, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, SubType: "message_changed", Message: &slack.Msg{Timestamp: "100.1", Text: "printer on fire"}}))
+	if !f.updated(ch2, boardB, "printer on fire") {
+		t.Fatalf("an edit in ch2 must refresh ch2's board, calls: %+v", f.calls)
+	}
+	a, _ = st.Get(ch, "100.1")
+	c, _ = st.Get(ch2, "100.1")
+	if a.Text != "api down" || c.Text != "printer on fire" {
+		t.Fatalf("an edit must change only its channel's task, got %q and %q", a.Text, c.Text)
+	}
+
+	c, _ = st.Get(ch2, "100.2")
+	key := c.Checklist()[0].Key
+	cb = tick("UBOB00001", "check:100.2:"+key, key)
+	cb.Channel.ID = ch2
+	f.reset()
+	b.HandleInteraction(cb)
+	a, _ = st.Get(ch, "100.2")
+	c, _ = st.Get(ch2, "100.2")
+	if a.Checklist()[0].Checked || !c.Checklist()[0].Checked {
+		t.Fatal("a tick must change only its channel's task")
+	}
+	if !f.updated(ch2, boardB, "1/1") {
+		t.Fatalf("a tick in ch2 must refresh ch2's board, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, SubType: "message_changed",
+		Message: &slack.Msg{SubType: "tombstone", Timestamp: "100.3", Text: "This message was deleted."}}))
+	if a, _ := st.Get(ch, "100.3"); a == nil {
+		t.Fatal("a tombstone in one channel must not remove the other's task")
+	}
+	if c, _ := st.Get(ch2, "100.3"); c != nil {
+		t.Fatal("the tombstoned task should be gone")
+	}
+	if !f.updated(ch2, boardB, "open") || f.find("delete", "") == nil {
+		t.Fatalf("a delete in ch2 must drop the card and refresh ch2's board, calls: %+v", f.calls)
+	}
+
+	start := b.now()
+	f.reset()
+	b.now = func() time.Time { return start.Add(25 * time.Hour) }
+	b.remindStale()
+	if c := f.find("post", "Still on it?"); c == nil || c.channel != ch2 {
+		t.Fatalf("stale reminders must cover every channel, calls: %+v", f.calls)
+	}
+
+	b.cfg.DoneRetainDays = 7
+	b.Handle(reactIn(ch2, "UBOB00001", "white_check_mark", "300.1", true))
+	b.now = func() time.Time { return start.Add(9 * 24 * time.Hour) }
+	b.sweepDone()
+	if c, _ := st.Get(ch2, "300.1"); c != nil {
+		t.Fatal("the sweep must cover every channel")
+	}
+	b.cfg.DoneRetainDays = -1
+
+	b.cfg.StatusClaims = true
+	f.reset()
+	b.Handle(reactIn(ch2, "UBOB00001", "raising_hand", "100.1", false))
+	if c := f.find("reactions", ""); c == nil || c.channel != ch2 {
+		t.Fatalf("reactions must be read in the task's channel, calls: %+v", f.calls)
+	}
+	b.cfg.StatusClaims = false
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, SubType: "message_deleted", DeletedTimeStamp: "100.1"}))
+	if a, _ := st.Get(ch, "100.1"); a == nil {
+		t.Fatal("a delete in one channel must not remove the other's task")
+	}
+	if c, _ := st.Get(ch2, "100.1"); c != nil {
+		t.Fatal("the deleted task should be gone")
+	}
+}
+
+func TestRefreshBoardsCoversEveryChannel(t *testing.T) {
+	b, _, st := setup(t)
+	b.refreshBoards()
+	for _, c := range []string{ch, ch2} {
+		if ts, _ := st.KV(boardKey(c)); ts == "" {
+			t.Fatalf("%s has no board after start", c)
+		}
+	}
+}
+
+func TestBoardFillFailureDeletesPlaceholder(t *testing.T) {
+	b, f, st := setup(t)
+	f.errs = []string{"ratelimited"}
+	b.refreshBoard(ch2)
+	placeholder := f.find("post", "loading board")
+	if c := f.find("delete", ""); placeholder == nil || c == nil || c.ts != placeholder.ts || c.channel != ch2 {
+		t.Fatalf("an unfilled placeholder must be deleted from its channel, calls: %+v", f.calls)
+	}
+	if ts, _ := st.KV(boardKey(ch2)); ts != "" {
+		t.Fatalf("an unfilled board must not be saved, got %q", ts)
 	}
 }
 

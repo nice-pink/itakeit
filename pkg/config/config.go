@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,7 +14,10 @@ import (
 )
 
 type Config struct {
-	Channel         string                   `yaml:"channel"`
+	// Channels lists the channel IDs the bot serves, all with the settings below.
+	// The older single `channel` key is still read and becomes a one-item list.
+	Channels        []string                 `yaml:"channels"`
+	LegacyChannel   string                   `yaml:"channel"` // folded into Channels by Parse
 	DBPath          string                   `yaml:"db_path"`
 	DatabaseURL     string                   `yaml:"database_url"`
 	StaleAfterHours int                      `yaml:"stale_after_hours"`
@@ -22,8 +26,13 @@ type Config struct {
 	StatusClaims    bool                     `yaml:"status_claims"`
 	Emoji           map[task.Action][]string `yaml:"emoji"`
 
-	byEmoji map[string]task.Action
+	byEmoji  map[string]task.Action
+	channels map[string]bool
 }
+
+// channelID matches public (C) and private (G, older) channel IDs. A channel name
+// such as #itakeit would otherwise load fine and be ignored forever.
+var channelID = regexp.MustCompile(`^[CG][A-Z0-9]+$`)
 
 // Defaults applied for any field left empty in the file.
 var Defaults = Config{
@@ -73,8 +82,26 @@ func Parse(raw []byte) (*Config, error) {
 }
 
 func (c *Config) index() error {
-	if c.Channel == "" {
-		return errors.New("config: channel is required (a channel ID like C0123456789)")
+	if c.LegacyChannel != "" {
+		if len(c.Channels) > 0 {
+			return errors.New("config: set channels or channel, not both")
+		}
+		c.Channels, c.LegacyChannel = []string{c.LegacyChannel}, ""
+	}
+	if len(c.Channels) == 0 {
+		return errors.New("config: channels is required (channel IDs like C0123456789)")
+	}
+	c.channels = map[string]bool{}
+	for i, ch := range c.Channels {
+		ch = strings.TrimSpace(ch)
+		if !channelID.MatchString(ch) {
+			return fmt.Errorf("config: %q is not a channel ID (like C0123456789, from channel details -> About)", ch)
+		}
+		c.Channels[i] = ch
+		if c.channels[ch] {
+			return fmt.Errorf("config: channel %q listed twice", ch)
+		}
+		c.channels[ch] = true
 	}
 	if c.StaleAfterHours < 0 || c.BoardMaxTasks < 0 {
 		return errors.New("config: stale_after_hours and board_max_tasks must be positive")
@@ -100,6 +127,9 @@ func (c *Config) index() error {
 	}
 	return nil
 }
+
+// Serves reports whether channel is one of the configured channels.
+func (c *Config) Serves(channel string) bool { return c.channels[channel] }
 
 // Action resolves a reaction name. Skin tone variants ("raising_hand::skin-tone-3")
 // resolve to their base emoji.

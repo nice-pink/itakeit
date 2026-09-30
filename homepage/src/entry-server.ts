@@ -14,7 +14,7 @@ const app = {
   applicationCategory: 'BusinessApplication',
   applicationSubCategory: 'Task tracking',
   operatingSystem: 'Linux (Docker)',
-  description: 'A free, self-hosted Slack bot that turns every message in one channel into a task. People claim it with a 🙋 reaction, owners set the status with reactions, and a pinned board lists every open task.',
+  description: 'A free, self-hosted Slack bot that turns every message in its channels into a task. People claim it with a 🙋 reaction, owners set the status with reactions, and a pinned board lists every open task.',
   downloadUrl: image,
   softwareHelp: repo,
   isAccessibleForFree: true,

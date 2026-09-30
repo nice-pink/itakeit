@@ -7,7 +7,7 @@
   import { agentPage, image, repo } from './lib/site'
 
   const features = [
-    { icon: '📝', title: 'Every message is a task', text: 'Post an issue in the channel. The bot replies in its thread with a status card.' },
+    { icon: '📝', title: 'Every message is a task', text: 'Post an issue in a task channel. The bot replies in its thread with a status card.' },
     { icon: '🙋', title: 'Claim with one reaction', text: 'React 🙋 to take it. Several people can own a task. Remove the reaction to hand it back.' },
     { icon: '🚧', title: 'Status by emoji', text: 'Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.' },
     { icon: '❓', title: 'Ask the reporter', text: '❓ pings the reporter in the thread. Their reply pings the owners and clears the status.' },
@@ -17,7 +17,7 @@
     { icon: '⏰', title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
   ]
 
-  const config = `channel: C0123456789\ndb_path: /data/itakeit.db`
+  const config = `channels: [C0123456789]\ndb_path: /data/itakeit.db`
 
   const run = `docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data ${image}`
 
@@ -67,7 +67,7 @@ volumes:
     <div class="pitch">
       <img class="turtle" src="./turtle.png" alt="itakeit pixel turtle" width="400" height="259" />
       <h1>Task tracking in Slack threads. <span>Dead simple.</span></h1>
-      <p class="lead"><b>itakeit</b> turns every message in one Slack channel into a task. People take it with <RaiseHand />, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
+      <p class="lead"><b>itakeit</b> turns every message in its Slack channels into a task. People take it with <RaiseHand />, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
       <div class="cta">
         <a class="btn" href="#setup">Set it up</a>
         <a class="btn ghost" href={repo}>View on GitHub</a>
@@ -83,7 +83,7 @@ volumes:
   <section id="how" class="band">
     <div class="wrap">
       <h2>How it works</h2>
-      <p class="sub">One dedicated channel. No forms, no extra tool, no context switch.</p>
+      <p class="sub">Dedicated channels. No forms, no extra tool, no context switch.</p>
       <div class="grid">
         {#each features as f (f.title)}
           <article class="card">
@@ -116,8 +116,8 @@ volumes:
         <p>Under <b>Install App</b>, install the app to your workspace and copy the <b>Bot User OAuth Token</b>. That <code>xoxb-…</code> token is <code>SLACK_BOT_TOKEN</code>.</p>
       </li>
       <li>
-        <h3>Prepare the channel</h3>
-        <p>Create a channel such as <code>#itakeit</code> (public or private), invite the bot with <code>/invite @itakeit</code>, and copy the channel ID from <b>channel name → About</b>. It looks like <code>C0123456789</code>.</p>
+        <h3>Prepare the channels</h3>
+        <p>Create a channel such as <code>#itakeit</code> (public or private), invite the bot with <code>/invite @itakeit</code>, and copy the channel ID from <b>channel name → About</b>. It looks like <code>C0123456789</code>. One instance serves several channels: repeat this for each and list every ID under <code>channels</code>. Each gets its own tasks and board.</p>
       </li>
       <li>
         <h3>Write config.yaml</h3>
@@ -135,12 +135,12 @@ volumes:
           <p>Put the tokens in a <code>.env</code> file next to it and run <code>docker compose up -d</code>.</p>
           <Code code={compose} label="compose.yaml" />
         </details>
-        <p>The log shows <code>authenticated</code> and <code>connected to slack</code>, and a board appears pinned in the channel. Post a message and react <RaiseHand />.</p>
+        <p>The log shows <code>authenticated</code> and <code>connected to slack</code>, and a board appears pinned in each channel. Post a message and react <RaiseHand />.</p>
       </li>
     </ol>
 
     <div class="note">
-      <b>Run exactly one instance per channel.</b> The container makes only outbound connections and needs no port. State lives in the <code>itakeit-data</code> volume, so it survives restarts and upgrades.
+      <b>Run exactly one instance per Slack app</b>, with all its channels in one config. The container makes only outbound connections and needs no port. State lives in the <code>itakeit-data</code> volume, so it survives restarts and upgrades.
     </div>
   </section>
 

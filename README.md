@@ -4,14 +4,14 @@
 
 Task tracking in Slack threads. Dead simple.
 
-A self-hosted Slack bot that turns every message in one dedicated channel into a task. People claim it and set its status with reactions. Homepage: [itakeit.nice.pink](https://itakeit.nice.pink).
+A self-hosted Slack bot that turns every message in its dedicated channels into a task. People claim it and set its status with reactions. Homepage: [itakeit.nice.pink](https://itakeit.nice.pink).
 
-- Post an issue in the channel and it becomes a task. The bot replies in its thread with a status card.
+- Post an issue in one of the channels and it becomes a task. The bot replies in its thread with a status card.
 - React 🙋 (`:raising_hand:`) on the issue to take it. Several people can own one task. Remove the reaction to hand it back.
 - Owners set the status with reactions: 👀 investigating, 🚧 in progress, ❓ needs info, ⛔ blocked, ✅ done.
 - ❓ pings the reporter in the thread. When the reporter replies, the bot pings the owners and clears the status.
 - Lines written as `[ ] item` in the issue become a checklist on the status card. Anyone can tick them.
-- A pinned board message in the channel counts the open tasks in each status and lists the oldest `board_max_tasks` of them with their status and owners.
+- A pinned board message in each channel counts the open tasks in each status and lists the oldest `board_max_tasks` of them with their status and owners.
 - Owners who stay silent on a task they are working on get a reminder in the thread, repeated every `stale_after_hours` until an owner posts in the thread or the status changes.
 
 It uses Socket Mode, so it needs no public URL, ingress or TLS. It runs as a single process with a SQLite file, or with Postgres when a database URL is configured.
@@ -38,10 +38,12 @@ The manifest also turns on **Interactivity**, which the checklist checkboxes nee
 
 If you change scopes later, reinstall the app so they take effect.
 
-### 2. Prepare the channel
+### 2. Prepare the channels
+
+One instance serves any number of channels. Each has its own tasks and board, and all share the settings in `config.yaml`. For every channel:
 
 1. Create the channel, e.g. `#itakeit`. Public or private both work.
-2. Invite the bot: `/invite @itakeit`. It only sees channels it is a member of.
+2. Invite the bot: `/invite @itakeit`. It only sees channels it is a member of, and it ignores channels missing from `channels`.
 3. Copy the channel ID: open the channel name, then **About**, and find it at the bottom (`C0123456789`).
 
 ### 3. Configure
@@ -50,7 +52,7 @@ If you change scopes later, reinstall the app so they take effect.
 cp config.example.yaml config.yaml
 ```
 
-Set `channel` to the ID from step 2. Every other field has a default, and all fields are explained in the example file. Tokens come only from the environment and never go into the config file.
+Set `channels` to the IDs from step 2. The older single `channel: C0123456789` key still works. Every other field has a default, and all fields are explained in the example file. Tokens come only from the environment and never go into the config file.
 
 ### 4. Run locally
 
@@ -58,7 +60,7 @@ Set `channel` to the ID from step 2. Every other field has a default, and all fi
 ./build && SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... ./bin/itakeit -config config.yaml
 ```
 
-The log should show `authenticated` and then `connected to slack`, and a board message appears pinned in the channel. `-debug` logs the raw Socket Mode traffic.
+The log should show `authenticated` and then `connected to slack`, and a board message appears pinned in each channel. `-debug` logs the raw Socket Mode traffic.
 
 ### 5. Run in Docker
 
@@ -82,13 +84,15 @@ With SQLite, set `db_path: /data/itakeit.db` in `config.yaml` so state survives 
 
 Set `ITAKEIT_DATABASE_URL` to use Postgres instead of SQLite, for example `ITAKEIT_DATABASE_URL=postgres://itakeit:secret@db:5432/itakeit` (add `-e ITAKEIT_DATABASE_URL` to `docker run`), or set `database_url` in `config.yaml`. The environment variable wins when both are set; prefer it, because the URL holds the password. `db_path` is then ignored. Connecting times out after 10 s unless the URL sets a non-zero `connect_timeout`. Fields the URL leaves out (host, user, password, `sslmode`) fall back to the standard `PG*` environment variables and `~/.pgpass`, so give the full URL when the environment carries another service's. The bot creates its tables on start (`tasks`, `owners`, `checks`, `kv`). These names are generic, so give it its own database, or its own schema: run `CREATE SCHEMA itakeit` first and add `search_path=itakeit` to the URL's query string. Existing SQLite data is not copied over; the bot starts empty and tasks come back as people react.
 
-Run **exactly one instance** per channel. Two instances would both reply to every event and post duplicate cards.
+Run **exactly one instance** per Slack app, with every channel in its `channels` list. Slack delivers each Socket Mode event to only one of an app's open connections, so two instances would each miss events meant for the other. A second, separately configured set of channels needs its own Slack app.
+
+Merging instances that each served one channel: give the merged instance one database (Postgres, or the SQLite file of one of them). Channels whose state was in another database start empty, and the bot pins a fresh board in each; unpin the old one. Tasks come back as people react. A channel removed from `channels` keeps its rows in the database, and `done_retain_days` no longer cleans them up.
 
 ## Usage
 
 | Who | Does | Effect |
 |---|---|---|
-| anyone | posts a top-level message in the channel | new task, status card in its thread, board updated |
+| anyone | posts a top-level message in a served channel | new task, status card in its thread, board updated |
 | anyone | reacts 🙋 on the task message | becomes an owner |
 | owner | removes 🙋 | stops owning it. When the last owner leaves, the status resets to unclaimed, except that a done task stays done. |
 | owner | reacts 👀 / 🚧 / ⛔ / ✅ | sets the status. The most recent reaction wins. ✅ removes the task from the board. |

@@ -1,5 +1,8 @@
-# Channel ID of the dedicated channel (not its name). Find it under channel details -> About.
-channel: C0123456789
+# IDs of the channels the bot serves (not their names). Find one under channel details ->
+# About. Each channel has its own tasks and board; all share the settings below. The bot
+# must be invited to each. A single `channel: C0123456789` is still accepted.
+channels:
+  - C0123456789
 
 # SQLite file holding owners, statuses and the board message timestamp. Ignored when
 # a Postgres URL is set.

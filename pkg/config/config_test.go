@@ -23,6 +23,20 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+func TestChannels(t *testing.T) {
+	c, err := Parse([]byte("channels: [C1, C2]"))
+	if err != nil || !c.Serves("C1") || !c.Serves("C2") || c.Serves("C3") {
+		t.Fatalf("channels not read: %+v %v", c, err)
+	}
+	if c, err := Parse([]byte("channels: [\" C1 \"]")); err != nil || !c.Serves("C1") {
+		t.Fatalf("channel IDs are trimmed: %+v %v", c, err)
+	}
+	c, err = Parse([]byte("channel: C1"))
+	if err != nil || len(c.Channels) != 1 || !c.Serves("C1") {
+		t.Fatalf("the single channel key must still work: %+v %v", c, err)
+	}
+}
+
 func TestDatabaseURL(t *testing.T) {
 	c, err := Parse([]byte("channel: C1\ndatabase_url: postgres://u:p@h/db"))
 	if err != nil || c.DatabaseURL != "postgres://u:p@h/db" {
@@ -56,6 +70,11 @@ func TestCustomEmoji(t *testing.T) {
 func TestInvalid(t *testing.T) {
 	cases := map[string]string{
 		"missing channel": "db_path: x.db",
+		"empty channels":  "channels: []",
+		"both keys":       "channel: C1\nchannels: [C2]",
+		"twice":           "channels: [C1, C1]",
+		"blank channel":   "channels: [C1, \"\"]",
+		"channel name":    "channels: [\"#itakeit\"]",
 		"unknown action":  "channel: C1\nemoji:\n  claim: [a]\n  yolo: [b]",
 		"no claim":        "channel: C1\nemoji:\n  done: [a]",
 		"duplicate emoji": "channel: C1\nemoji:\n  claim: [a]\n  done: [a]",

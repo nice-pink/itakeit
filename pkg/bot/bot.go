@@ -59,7 +59,7 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 	go func() { errc <- sm.RunContext(ctx) }()
 	events, interactions := ackLoop(ctx, sm)
 
-	b.refreshBoard()
+	b.refreshBoards()
 	tick := time.NewTicker(staleInterval(b.cfg.StaleAfter()))
 	defer tick.Stop()
 	var sweep <-chan time.Time // nil, never fires, when cleanup is off
@@ -157,12 +157,12 @@ func (b *Bot) Handle(e slackevents.EventsAPIEvent) {
 
 // HandleInteraction applies checklist ticks from a card. Exported for tests.
 func (b *Bot) HandleInteraction(cb slack.InteractionCallback) {
-	if cb.Type != slack.InteractionTypeBlockActions || cb.Channel.ID != b.cfg.Channel {
+	if cb.Type != slack.InteractionTypeBlockActions || !b.cfg.Serves(cb.Channel.ID) {
 		return
 	}
 	for _, a := range cb.ActionCallback.BlockActions {
 		if a.ActionID == checkAction {
-			b.onCheck(cb.User.ID, a)
+			b.onCheck(cb.Channel.ID, cb.User.ID, a)
 		}
 	}
 }
@@ -170,12 +170,12 @@ func (b *Bot) HandleInteraction(cb slack.InteractionCallback) {
 // onCheck applies one click. Every item is its own checkbox element, so a click
 // reports exactly one item and a stale view of the others cannot untick them.
 // The block ID is "check:<task ts>:<item key>".
-func (b *Bot) onCheck(user string, a *slack.BlockAction) {
+func (b *Bot) onCheck(channel, user string, a *slack.BlockAction) {
 	parts := strings.SplitN(a.BlockID, ":", 3)
 	if len(parts) != 3 || parts[0] != "check" {
 		return
 	}
-	t := b.get(parts[1])
+	t := b.get(channel, parts[1])
 	if t == nil {
 		return // swept or unknown: the card is frozen
 	}
@@ -188,7 +188,7 @@ func (b *Bot) onCheck(user string, a *slack.BlockAction) {
 	}
 	b.save(t)
 	b.updateCard(t)
-	b.refreshBoard()
+	b.refreshBoard(t.Channel)
 	if eff == task.ChecklistDone {
 		who := task.Mention(t.Reporter)
 		if len(t.Owners) > 0 {
@@ -203,7 +203,7 @@ func (b *Bot) onCheck(user string, a *slack.BlockAction) {
 }
 
 func (b *Bot) onMessage(ev *slackevents.MessageEvent) {
-	if ev.Channel != b.cfg.Channel {
+	if !b.cfg.Serves(ev.Channel) {
 		return
 	}
 	switch ev.SubType {
@@ -215,30 +215,30 @@ func (b *Bot) onMessage(ev *slackevents.MessageEvent) {
 		// A deleted message that has replies (every task has its card) stays as a
 		// tombstone and arrives as message_changed, not message_deleted.
 		if m.SubType == "tombstone" {
-			b.onDelete(m.Timestamp)
+			b.onDelete(ev.Channel, m.Timestamp)
 			return
 		}
-		b.onEdit(m.Timestamp, m.Text)
+		b.onEdit(ev.Channel, m.Timestamp, m.Text)
 	case "message_deleted":
-		b.onDelete(ev.DeletedTimeStamp)
+		b.onDelete(ev.Channel, ev.DeletedTimeStamp)
 	case "", "bot_message", "file_share", "thread_broadcast":
 		if b.own(ev.User, ev.BotID) {
 			return
 		}
 		if !isRoot(ev.ThreadTimeStamp, ev.TimeStamp) {
-			b.onReply(ev.ThreadTimeStamp, ev.User)
+			b.onReply(ev.Channel, ev.ThreadTimeStamp, ev.User)
 			return
 		}
-		if b.get(ev.TimeStamp) != nil {
+		if b.get(ev.Channel, ev.TimeStamp) != nil {
 			return // redelivered event
 		}
-		b.create(ev.TimeStamp, reporter(ev.User, ev.Username, ev.BotID), ev.Text)
+		b.create(ev.Channel, ev.TimeStamp, reporter(ev.User, ev.Username, ev.BotID), ev.Text)
 	}
 }
 
-func (b *Bot) create(ts, reporter, text string) *task.Task {
+func (b *Bot) create(channel, ts, reporter, text string) *task.Task {
 	now := b.now()
-	t := &task.Task{Channel: b.cfg.Channel, TS: ts, Reporter: reporter, Text: text, CreatedAt: now, LastActivity: now}
+	t := &task.Task{Channel: channel, TS: ts, Reporter: reporter, Text: text, CreatedAt: now, LastActivity: now}
 	link, err := b.api.GetPermalink(&slack.PermalinkParameters{Channel: t.Channel, Ts: ts})
 	if err != nil {
 		slog.Warn("permalink", "ts", ts, "err", err)
@@ -246,13 +246,13 @@ func (b *Bot) create(ts, reporter, text string) *task.Task {
 	t.Permalink = link
 	b.save(t)
 	b.updateCard(t)
-	b.refreshBoard()
-	slog.Info("task created", "ts", ts, "reporter", reporter)
+	b.refreshBoard(t.Channel)
+	slog.Info("task created", "channel", channel, "ts", ts, "reporter", reporter)
 	return t
 }
 
-func (b *Bot) onReply(threadTS, user string) {
-	t := b.get(threadTS)
+func (b *Bot) onReply(channel, threadTS, user string) {
+	t := b.get(channel, threadTS)
 	if t == nil {
 		return
 	}
@@ -261,12 +261,12 @@ func (b *Bot) onReply(threadTS, user string) {
 	if eff == task.NotifyOwners {
 		b.say(t, fmt.Sprintf("%s: %s added details.", task.Mentions(t.Owners), task.Mention(t.Reporter)))
 		b.updateCard(t)
-		b.refreshBoard()
+		b.refreshBoard(t.Channel)
 	}
 }
 
-func (b *Bot) onEdit(ts, text string) {
-	t := b.get(ts)
+func (b *Bot) onEdit(channel, ts, text string) {
+	t := b.get(channel, ts)
 	if t == nil || t.Text == text {
 		return
 	}
@@ -276,11 +276,11 @@ func (b *Bot) onEdit(ts, text string) {
 	if !slices.Equal(before, t.Checklist()) {
 		b.updateCard(t)
 	}
-	b.refreshBoard()
+	b.refreshBoard(t.Channel)
 }
 
-func (b *Bot) onDelete(ts string) {
-	t := b.get(ts)
+func (b *Bot) onDelete(channel, ts string) {
+	t := b.get(channel, ts)
 	if t == nil {
 		return
 	}
@@ -292,20 +292,20 @@ func (b *Bot) onDelete(ts string) {
 	if err := b.store.Delete(t.Channel, ts); err != nil {
 		slog.Error("delete task", "ts", ts, "err", err)
 	}
-	b.refreshBoard()
+	b.refreshBoard(t.Channel)
 }
 
 func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added bool) {
-	if item.Type != "message" || item.Channel != b.cfg.Channel || user == b.botUserID {
+	if item.Type != "message" || !b.cfg.Serves(item.Channel) || user == b.botUserID {
 		return
 	}
 	a, ok := b.cfg.Action(reaction)
 	if !ok {
 		return
 	}
-	t := b.get(item.Timestamp)
+	t := b.get(item.Channel, item.Timestamp)
 	if t == nil && added {
-		t = b.adopt(item.Timestamp)
+		t = b.adopt(item.Channel, item.Timestamp)
 	}
 	if t == nil {
 		return
@@ -330,7 +330,7 @@ func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added boo
 	}
 	b.save(t)
 	b.updateCard(t)
-	b.refreshBoard()
+	b.refreshBoard(t.Channel)
 }
 
 // holding reports whether user still has a claim or status reaction on the task
@@ -361,14 +361,14 @@ func (b *Bot) holding(t *task.Task, user, removed string) bool {
 //
 // Messages older than done_retain_days are never adopted: every swept task is
 // that old, and adopting one would reopen finished work under a second card.
-func (b *Bot) adopt(ts string) *task.Task {
+func (b *Bot) adopt(channel, ts string) *task.Task {
 	if r := b.cfg.DoneRetain(); r > 0 {
 		if sec, err := strconv.ParseFloat(ts, 64); err == nil && b.now().Sub(time.Unix(int64(sec), 0)) >= r {
 			return nil
 		}
 	}
 	h, err := b.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
-		ChannelID: b.cfg.Channel, Latest: ts, Oldest: ts, Inclusive: true, Limit: 1})
+		ChannelID: channel, Latest: ts, Oldest: ts, Inclusive: true, Limit: 1})
 	if err != nil {
 		slog.Warn("adopt: history", "ts", ts, "err", err)
 		return nil
@@ -385,13 +385,19 @@ func (b *Bot) adopt(ts string) *task.Task {
 	default:
 		return nil
 	}
-	return b.create(ts, reporter(m.User, m.Username, m.BotID), m.Text)
+	return b.create(channel, ts, reporter(m.User, m.Username, m.BotID), m.Text)
 }
 
 func (b *Bot) remindStale() {
-	open, err := b.store.Open(b.cfg.Channel)
+	for _, c := range b.cfg.Channels {
+		b.remindStaleIn(c)
+	}
+}
+
+func (b *Bot) remindStaleIn(channel string) {
+	open, err := b.store.Open(channel)
 	if err != nil {
-		slog.Error("list open", "err", err)
+		slog.Error("list open", "channel", channel, "err", err)
 		return
 	}
 	now := b.now()
@@ -418,13 +424,15 @@ func (b *Bot) sweepDone() {
 	if b.cfg.DoneRetain() <= 0 {
 		return
 	}
-	n, err := b.store.DeleteDone(b.cfg.Channel, b.now().Add(-b.cfg.DoneRetain()))
-	if err != nil {
-		slog.Error("sweep done", "err", err)
-		return
-	}
-	if n > 0 {
-		slog.Info("swept done tasks", "count", n)
+	for _, c := range b.cfg.Channels {
+		n, err := b.store.DeleteDone(c, b.now().Add(-b.cfg.DoneRetain()))
+		if err != nil {
+			slog.Error("sweep done", "channel", c, "err", err)
+			continue
+		}
+		if n > 0 {
+			slog.Info("swept done tasks", "channel", c, "count", n)
+		}
 	}
 }
 
@@ -497,43 +505,50 @@ func optionText(s string) string {
 	}
 }
 
-func (b *Bot) refreshBoard() {
-	open, err := b.store.Open(b.cfg.Channel)
+// refreshBoards brings every channel's board up to date, as on start.
+func (b *Bot) refreshBoards() {
+	for _, c := range b.cfg.Channels {
+		b.refreshBoard(c)
+	}
+}
+
+func (b *Bot) refreshBoard(channel string) {
+	open, err := b.store.Open(channel)
 	if err != nil {
-		slog.Error("list open", "err", err)
+		slog.Error("list open", "channel", channel, "err", err)
 		return
 	}
 	text := slack.MsgOptionText(task.Board(open, b.emoji, b.cfg.BoardMaxTasks, b.now()), false)
-	ts, err := b.store.KV(boardKey(b.cfg.Channel))
+	ts, err := b.store.KV(boardKey(channel))
 	if err != nil {
-		slog.Error("board ts", "err", err)
+		slog.Error("board ts", "channel", channel, "err", err)
 		return
 	}
 	if ts != "" {
-		if _, _, _, err := b.api.UpdateMessage(b.cfg.Channel, ts, text, slack.MsgOptionDisableLinkUnfurl()); err == nil {
+		if _, _, _, err := b.api.UpdateMessage(channel, ts, text, slack.MsgOptionDisableLinkUnfurl()); err == nil {
 			return
 		} else if err.Error() != "message_not_found" {
-			slog.Warn("update board", "err", err)
+			slog.Warn("update board", "channel", channel, "err", err)
 			return
 		}
 	}
 	// Post a placeholder and edit the content in: a new message would notify every
 	// owner and @here in the excerpts, an edit notifies nobody.
-	_, ts, err = b.api.PostMessage(b.cfg.Channel, slack.MsgOptionText("I take it: loading board…", false))
+	_, ts, err = b.api.PostMessage(channel, slack.MsgOptionText("I take it: loading board…", false))
 	if err != nil {
-		slog.Warn("post board", "err", err)
+		slog.Warn("post board", "channel", channel, "err", err)
 		return
 	}
-	if _, _, _, err := b.api.UpdateMessage(b.cfg.Channel, ts, text, slack.MsgOptionDisableLinkUnfurl()); err != nil {
-		slog.Warn("fill board", "err", err)
-		b.api.DeleteMessage(b.cfg.Channel, ts) // retried on the next change
+	if _, _, _, err := b.api.UpdateMessage(channel, ts, text, slack.MsgOptionDisableLinkUnfurl()); err != nil {
+		slog.Warn("fill board", "channel", channel, "err", err)
+		b.api.DeleteMessage(channel, ts) // retried on the next change
 		return
 	}
-	if err := b.api.AddPin(b.cfg.Channel, slack.ItemRef{Channel: b.cfg.Channel, Timestamp: ts}); err != nil {
-		slog.Warn("pin board", "err", err)
+	if err := b.api.AddPin(channel, slack.ItemRef{Channel: channel, Timestamp: ts}); err != nil {
+		slog.Warn("pin board", "channel", channel, "err", err)
 	}
-	if err := b.store.SetKV(boardKey(b.cfg.Channel), ts); err != nil {
-		slog.Error("save board ts", "err", err)
+	if err := b.store.SetKV(boardKey(channel), ts); err != nil {
+		slog.Error("save board ts", "channel", channel, "err", err)
 	}
 }
 
@@ -543,8 +558,8 @@ func (b *Bot) say(t *task.Task, text string) {
 	}
 }
 
-func (b *Bot) get(ts string) *task.Task {
-	t, err := b.store.Get(b.cfg.Channel, ts)
+func (b *Bot) get(channel, ts string) *task.Task {
+	t, err := b.store.Get(channel, ts)
 	if err != nil {
 		slog.Error("get task", "ts", ts, "err", err)
 	}

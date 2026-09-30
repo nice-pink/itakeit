@@ -53,7 +53,7 @@ func run(cfgPath string, debug bool) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("authenticated", "team", auth.Team, "bot_user", auth.UserID, "channel", cfg.Channel)
+	slog.Info("authenticated", "team", auth.Team, "bot_user", auth.UserID, "channels", cfg.Channels)
 
 	sm := socketmode.New(api, socketmode.OptionDebug(debug))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

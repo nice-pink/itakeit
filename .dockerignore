@@ -7,3 +7,11 @@ config.yaml
 cover.out
 .git
 homepage/
+slack-app-manifest.yaml
+.agent/
+.claude/
+.playwright-mcp/
+.github/
+.gitignore
+CLAUDE.md
+CLAUDE.local.md

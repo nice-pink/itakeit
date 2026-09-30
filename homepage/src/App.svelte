@@ -12,12 +12,12 @@
     { icon: '🚧', title: 'Status by emoji', text: 'Owners react 👀 investigating, 🚧 in progress, ⛔ blocked or ✅ done. The latest reaction wins.' },
     { icon: '❓', title: 'Ask the reporter', text: '❓ pings the reporter in the thread. Their reply pings the owners and clears the status.' },
     { icon: '☑️', title: 'Checklists', text: 'Lines written as [ ] item in the issue become checkboxes on the status card. Anyone can tick them.' },
-    { icon: '📌', title: 'A pinned board', text: 'One pinned message counts the open tasks in each status and lists the oldest with their owners, always current.' },
+    { icon: '📌', title: 'A pinned board', text: 'A pinned message in each channel counts the open tasks in each status and lists the oldest with their owners, always current.' },
     { icon: '🔓', title: 'Status without claiming', text: 'Optional: with status_claims on, any status reaction makes you an owner, no 🙋 needed first.' },
     { icon: '⏰', title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
   ]
 
-  const config = `channels: [C0123456789]\ndb_path: /data/itakeit.db`
+  const config = `auto_channels: true\ndb_path: /data/itakeit.db`
 
   const run = `docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data ${image}`
 
@@ -36,6 +36,8 @@ volumes:
   itakeit-data:`
 
   const usage = [
+    ['anyone', 'invites the bot to a channel', "it becomes a task channel and its board is posted and pinned"],
+    ['anyone', 'removes the bot or archives the channel', 'the bot stops there; tasks stay in the database'],
     ['anyone', 'posts a top-level message', 'new task, status card in its thread, board updated'],
     ['anyone', 'reacts 🙋 on the task', 'becomes an owner'],
     ['owner', 'removes 🙋', 'stops owning it. When the last owner leaves, the task is unclaimed again, unless it is done.'],
@@ -72,7 +74,7 @@ volumes:
         <a class="btn" href="#setup">Set it up</a>
         <a class="btn ghost" href={repo}>View on GitHub</a>
       </div>
-      <p class="small">Self-hosted. One Docker container, one SQLite file, no public URL.</p>
+      <p class="small">Self-hosted. One Docker container, SQLite or Postgres, no public URL.</p>
     </div>
     <div class="demo">
       <Demo />
@@ -108,7 +110,7 @@ volumes:
           <summary>Show slack-app-manifest.yaml</summary>
           <Code code={manifest.trim()} label="slack-app-manifest.yaml" />
         </details>
-        <p>It requests only <code>channels:history</code>, <code>groups:history</code>, <code>chat:write</code>, <code>reactions:read</code> and <code>pins:write</code>, and turns on Interactivity for the checklist checkboxes. Socket Mode delivers the clicks, so no request URL is needed.</p>
+        <p>It requests only <code>channels:history</code>, <code>groups:history</code>, <code>channels:read</code>, <code>groups:read</code>, <code>chat:write</code>, <code>reactions:read</code> and <code>pins:write</code>, and turns on Interactivity for the checklist checkboxes. Socket Mode delivers the clicks, so no request URL is needed.</p>
       </li>
       <li>
         <h3>Get the two tokens</h3>
@@ -117,7 +119,7 @@ volumes:
       </li>
       <li>
         <h3>Prepare the channels</h3>
-        <p>Create a channel such as <code>#itakeit</code> (public or private), invite the bot with <code>/invite @itakeit</code>, and copy the channel ID from <b>channel name → About</b>. It looks like <code>C0123456789</code>. One instance serves several channels: repeat this for each and list every ID under <code>channels</code>. Each gets its own tasks and board.</p>
+        <p>Create a channel such as <code>#itakeit</code> (public or private) and invite the bot with <code>/invite @itakeit</code>. Every channel the bot is invited to becomes a task channel with its own tasks and pinned board, so invite it only where every top-level message should become a task. Remove it with <code>/remove @itakeit</code> to stop.</p>
       </li>
       <li>
         <h3>Write config.yaml</h3>
@@ -140,7 +142,7 @@ volumes:
     </ol>
 
     <div class="note">
-      <b>Run exactly one instance per Slack app</b>, with all its channels in one config. The container makes only outbound connections and needs no port. State lives in the <code>itakeit-data</code> volume, so it survives restarts and upgrades.
+      <b>Run exactly one instance per Slack app.</b> It serves every channel the bot is in. The container makes only outbound connections and needs no port. State lives in the <code>itakeit-data</code> volume, so it survives restarts and upgrades.
     </div>
   </section>
 
@@ -159,7 +161,7 @@ volumes:
         </table>
       </div>
       <div class="note agent">
-        <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in the channel with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
+        <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in one itakeit channel with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
       </div>
     </div>
   </section>

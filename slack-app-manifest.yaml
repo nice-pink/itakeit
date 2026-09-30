@@ -15,6 +15,8 @@ oauth_config:
     bot:
     - channels:history
     - groups:history
+    - channels:read
+    - groups:read
     - chat:write
     - reactions:read
     - pins:write
@@ -25,6 +27,12 @@ settings:
     - message.groups
     - reaction_added
     - reaction_removed
+    - member_joined_channel
+    - member_left_channel
+    - channel_left
+    - group_left
+    - channel_archive
+    - group_archive
   interactivity:
     is_enabled: true
   org_deploy_enabled: false

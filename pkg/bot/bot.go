@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type API interface {
 	GetConversationHistory(p *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
 	AddPin(channel string, item slack.ItemRef) error
 	GetReactions(item slack.ItemRef, p slack.GetReactionsParameters) (slack.ReactedItem, error)
+	GetConversationsForUser(p *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
 }
 
 type Bot struct {
@@ -47,10 +49,12 @@ type Bot struct {
 	botUserID string
 	botID     string
 	now       func() time.Time
+	joined    map[string]bool // channels served under auto_channels
+	left      map[string]bool // channels the bot was removed from, until it is invited back
 }
 
 func New(api API, st *store.Store, cfg *config.Config, botUserID, botID string) *Bot {
-	return &Bot{api: api, store: st, cfg: cfg, emoji: cfg.Display(), botUserID: botUserID, botID: botID, now: time.Now}
+	return &Bot{api: api, store: st, cfg: cfg, emoji: cfg.Display(), botUserID: botUserID, botID: botID, now: time.Now, joined: map[string]bool{}, left: map[string]bool{}}
 }
 
 // Run consumes Socket Mode events until ctx is cancelled.
@@ -59,7 +63,7 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 	go func() { errc <- sm.RunContext(ctx) }()
 	events, interactions := ackLoop(ctx, sm)
 
-	b.refreshBoards()
+	b.start()
 	tick := time.NewTicker(staleInterval(b.cfg.StaleAfter()))
 	defer tick.Stop()
 	var sweep <-chan time.Time // nil, never fires, when cleanup is off
@@ -76,6 +80,7 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 		case err := <-errc:
 			return err
 		case <-tick.C:
+			b.rediscover()
 			b.remindStale()
 		case <-sweep:
 			b.sweepDone()
@@ -152,12 +157,150 @@ func (b *Bot) Handle(e slackevents.EventsAPIEvent) {
 		b.onReaction(ev.User, ev.Reaction, ev.Item, true)
 	case *slackevents.ReactionRemovedEvent:
 		b.onReaction(ev.User, ev.Reaction, ev.Item, false)
+	case *slackevents.MemberJoinedChannelEvent:
+		if ev.User == b.botUserID {
+			b.onJoin(ev.Channel)
+		}
+	case *slackevents.MemberLeftChannelEvent:
+		if ev.User == b.botUserID {
+			b.onLeave(ev.Channel)
+		}
+	case *slackevents.ChannelLeftEvent:
+		b.onLeave(ev.Channel)
+	case *slackevents.GroupLeftEvent:
+		b.onLeave(ev.Channel)
+	case *slackevents.ChannelArchiveEvent:
+		b.onArchive(ev.Channel)
+	case *slackevents.GroupArchiveEvent:
+		b.onArchive(ev.Channel)
+	}
+}
+
+// start discovers channels and brings their boards up to date, before the
+// event loop runs.
+func (b *Bot) start() {
+	b.discover()
+	b.refreshBoards()
+}
+
+// serves reports whether events from channel are handled. Under auto_channels
+// that is any channel a message or reaction event arrives from, because Slack
+// sends those only for channels the bot is a member of, and the channel is
+// remembered so one missed by discover (or joined while the bot was down) still
+// gets its reminders and sweep. A channel the bot was removed from stays out
+// until it is invited back: the event loop does not keep Slack's order, so a
+// message sent just before the removal can be handled after it.
+func (b *Bot) serves(channel string) bool {
+	if !b.cfg.AutoChannels {
+		return b.cfg.Serves(channel)
+	}
+	if !config.IsChannelID(channel) || b.left[channel] {
+		return false
+	}
+	if !b.joined[channel] {
+		b.joined[channel] = true
+		slog.Info("serving channel", "channel", channel)
+	}
+	return true
+}
+
+// channels lists the channels whose boards, reminders and sweep the bot runs.
+func (b *Bot) channels() []string {
+	if !b.cfg.AutoChannels {
+		return b.cfg.Channels
+	}
+	return slices.Sorted(maps.Keys(b.joined))
+}
+
+// discover replaces the served channels with the unarchived channels the bot
+// is a member of, under auto_channels, and returns the ones that are new. The
+// listing is the truth: events are handled out of order, so a late leave, a
+// late message into an archived channel or a missed unarchive can leave the
+// served set wrong, and every discover corrects it. A failure is logged and
+// changes nothing; the next tick retries, and events still add channels.
+func (b *Bot) discover() []string {
+	if !b.cfg.AutoChannels {
+		return nil
+	}
+	found := map[string]bool{}
+	p := &slack.GetConversationsForUserParameters{Types: []string{"public_channel", "private_channel"}, ExcludeArchived: true, Limit: 200}
+	for {
+		chans, next, err := b.api.GetConversationsForUser(p)
+		if err != nil {
+			slog.Warn("list member channels", "err", err)
+			return nil
+		}
+		for _, c := range chans {
+			found[c.ID] = true
+		}
+		if next == "" {
+			break
+		}
+		p.Cursor = next
+	}
+	var added []string
+	for c := range found {
+		if !b.joined[c] {
+			added = append(added, c)
+			slog.Info("serving channel", "channel", c)
+		}
+	}
+	for c := range b.joined {
+		if !found[c] {
+			slog.Info("no longer a member, stopping", "channel", c)
+		}
+	}
+	b.joined, b.left = found, map[string]bool{}
+	slices.Sort(added)
+	return added
+}
+
+// rediscover runs discover on the reminder tick and posts the boards of
+// channels it found new.
+func (b *Bot) rediscover() {
+	for _, c := range b.discover() {
+		b.refreshBoard(c)
+	}
+}
+
+// onJoin posts the board as soon as the bot is invited to a served channel.
+func (b *Bot) onJoin(channel string) {
+	delete(b.left, channel)
+	if !b.serves(channel) {
+		slog.Info("invited to a channel the bot does not serve, ignoring it", "channel", channel)
+		return
+	}
+	b.refreshBoard(channel)
+}
+
+// onLeave stops boards, reminders and sweep for a channel the bot was removed
+// from, under auto_channels. Its rows stay; a new invite picks them up again.
+func (b *Bot) onLeave(channel string) {
+	if !b.cfg.AutoChannels {
+		return
+	}
+	b.left[channel] = true
+	if b.joined[channel] {
+		delete(b.joined, channel)
+		slog.Info("left channel", "channel", channel)
+	}
+}
+
+// onArchive stops boards, reminders and sweep for an archived channel, under
+// auto_channels. The bot is still a member, so a message after unarchiving
+// serves it again.
+func (b *Bot) onArchive(channel string) {
+	if b.cfg.AutoChannels && b.joined[channel] {
+		delete(b.joined, channel)
+		slog.Info("channel archived", "channel", channel)
 	}
 }
 
 // HandleInteraction applies checklist ticks from a card. Exported for tests.
 func (b *Bot) HandleInteraction(cb slack.InteractionCallback) {
-	if cb.Type != slack.InteractionTypeBlockActions || !b.cfg.Serves(cb.Channel.ID) {
+	// A click arrives even from a channel the bot has left, so it never adds one.
+	served := b.cfg.Serves(cb.Channel.ID) || b.joined[cb.Channel.ID]
+	if cb.Type != slack.InteractionTypeBlockActions || !served {
 		return
 	}
 	for _, a := range cb.ActionCallback.BlockActions {
@@ -203,7 +346,7 @@ func (b *Bot) onCheck(channel, user string, a *slack.BlockAction) {
 }
 
 func (b *Bot) onMessage(ev *slackevents.MessageEvent) {
-	if !b.cfg.Serves(ev.Channel) {
+	if !b.serves(ev.Channel) {
 		return
 	}
 	switch ev.SubType {
@@ -296,7 +439,7 @@ func (b *Bot) onDelete(channel, ts string) {
 }
 
 func (b *Bot) onReaction(user, reaction string, item slackevents.Item, added bool) {
-	if item.Type != "message" || !b.cfg.Serves(item.Channel) || user == b.botUserID {
+	if item.Type != "message" || !b.serves(item.Channel) || user == b.botUserID {
 		return
 	}
 	a, ok := b.cfg.Action(reaction)
@@ -389,7 +532,7 @@ func (b *Bot) adopt(channel, ts string) *task.Task {
 }
 
 func (b *Bot) remindStale() {
-	for _, c := range b.cfg.Channels {
+	for _, c := range b.channels() {
 		b.remindStaleIn(c)
 	}
 }
@@ -424,7 +567,7 @@ func (b *Bot) sweepDone() {
 	if b.cfg.DoneRetain() <= 0 {
 		return
 	}
-	for _, c := range b.cfg.Channels {
+	for _, c := range b.channels() {
 		n, err := b.store.DeleteDone(c, b.now().Add(-b.cfg.DoneRetain()))
 		if err != nil {
 			slog.Error("sweep done", "channel", c, "err", err)
@@ -507,7 +650,7 @@ func optionText(s string) string {
 
 // refreshBoards brings every channel's board up to date, as on start.
 func (b *Bot) refreshBoards() {
-	for _, c := range b.cfg.Channels {
+	for _, c := range b.channels() {
 		b.refreshBoard(c)
 	}
 }

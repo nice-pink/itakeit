@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +32,9 @@ type fakeAPI struct {
 	held    map[string][]slack.ItemReaction // reactions.get result by message ts
 	heldErr error
 	posted  map[string]string // channel of every message the bot posted, by ts
-	wrong   []string          // calls that named a message in the wrong channel
+	member  [][]string        // users.conversations pages, one per cursor
+	memberE error
+	wrong   []string // calls that named a message in the wrong channel
 }
 
 // at records a call on message ts in channel c that the bot posted elsewhere.
@@ -107,6 +111,33 @@ func (f *fakeAPI) GetReactions(item slack.ItemRef, _ slack.GetReactionsParameter
 	return slack.ReactedItem{Reactions: f.held[item.Timestamp]}, f.heldErr
 }
 
+func (f *fakeAPI) GetConversationsForUser(p *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error) {
+	if f.memberE != nil {
+		return nil, "", f.memberE
+	}
+	if !slices.Equal(p.Types, []string{"public_channel", "private_channel"}) || !p.ExcludeArchived {
+		return nil, "", fmt.Errorf("fake: list public and private, unarchived channels, got %+v", p)
+	}
+	page := 0
+	if p.Cursor != "" {
+		page, _ = strconv.Atoi(p.Cursor)
+	}
+	if page >= len(f.member) {
+		return nil, "", nil
+	}
+	var out []slack.Channel
+	for _, id := range f.member[page] {
+		c := slack.Channel{}
+		c.ID = id
+		out = append(out, c)
+	}
+	next := ""
+	if page+1 < len(f.member) {
+		next = strconv.Itoa(page + 1)
+	}
+	return out, next, nil
+}
+
 func (f *fakeAPI) reset() { f.calls = nil }
 
 func (f *fakeAPI) find(kind, contains string) *call {
@@ -130,7 +161,14 @@ func (f *fakeAPI) updated(channel, ts, text string) bool {
 
 func setup(t *testing.T) (*Bot, *fakeAPI, *store.Store) {
 	t.Helper()
-	cfg, err := config.Parse([]byte("channels: [" + ch + ", " + ch2 + "]\nstale_after_hours: 24\ndone_retain_days: -1"))
+	return setupWith(t, "channels: ["+ch+", "+ch2+"]")
+}
+
+// setupWith builds a bot whose config is channels (a channels or auto_channels
+// line) plus the settings every test shares.
+func setupWith(t *testing.T, channels string) (*Bot, *fakeAPI, *store.Store) {
+	t.Helper()
+	cfg, err := config.Parse([]byte(channels + "\nstale_after_hours: 24\ndone_retain_days: -1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,6 +612,237 @@ func TestBoardFillFailureDeletesPlaceholder(t *testing.T) {
 	}
 	if ts, _ := st.KV(boardKey(ch2)); ts != "" {
 		t.Fatalf("an unfilled board must not be saved, got %q", ts)
+	}
+}
+
+func joined(user, channel string) slackevents.EventsAPIEvent {
+	return slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MemberJoinedChannelEvent{User: user, Channel: channel}}}
+}
+
+func TestAutoChannels(t *testing.T) {
+	b, f, st := setupWith(t, "auto_channels: true")
+	f.member = [][]string{{ch}, {ch2}}
+	b.discover()
+	b.refreshBoards()
+	if got := b.channels(); !slices.Equal(got, []string{ch, ch2}) {
+		t.Fatalf("discover should read every page of member channels, got %v", got)
+	}
+	for _, c := range []string{ch, ch2} {
+		if ts, _ := st.KV(boardKey(c)); ts == "" {
+			t.Fatalf("%s: a discovered channel needs a board", c)
+		}
+	}
+
+	// A channel joined while the bot was down is served from its first event.
+	b.Handle(msg(&slackevents.MessageEvent{Channel: "CNEW00001", User: "UREPORT01", TimeStamp: "100.1", Text: "new place"}))
+	if tk, _ := st.Get("CNEW00001", "100.1"); tk == nil || !slices.Contains(b.channels(), "CNEW00001") {
+		t.Fatalf("an event from an unknown channel should start serving it, got %+v, channels %v", tk, b.channels())
+	}
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: "D00000001", User: "UREPORT01", TimeStamp: "100.2", Text: "dm"}))
+	if len(f.calls) != 0 || slices.Contains(b.channels(), "D00000001") {
+		t.Fatalf("a direct message is never a task channel, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(joined("UALICE001", "CTHIRD001"))
+	if len(f.calls) != 0 || slices.Contains(b.channels(), "CTHIRD001") {
+		t.Fatalf("someone else joining a channel must not make the bot serve it, calls: %+v", f.calls)
+	}
+	b.Handle(joined("UBOT00001", "CTHIRD001"))
+	if ts, _ := st.KV(boardKey("CTHIRD001")); ts == "" || !slices.Contains(b.channels(), "CTHIRD001") {
+		t.Fatal("an invite should serve the channel and post its board at once")
+	}
+
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.ChannelLeftEvent{Channel: ch}}})
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.GroupLeftEvent{Channel: ch2}}})
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MemberLeftChannelEvent{User: "UBOT00001", Channel: "CTHIRD001"}}})
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MemberLeftChannelEvent{User: "UALICE001", Channel: "CNEW00001"}}})
+	if got := b.channels(); !slices.Equal(got, []string{"CNEW00001"}) {
+		t.Fatalf("leaving should stop serving only the channels the bot left, got %v", got)
+	}
+
+	// Rejoining reuses the channel's existing board.
+	old, _ := st.KV(boardKey(ch))
+	b.Handle(joined("UBOT00001", ch))
+	if now, _ := st.KV(boardKey(ch)); now != old {
+		t.Fatalf("a rejoin should edit the old board, not post another: %q -> %q", old, now)
+	}
+}
+
+func TestAutoChannelsServeEverything(t *testing.T) {
+	b, f, st := setupWith(t, "auto_channels: true")
+	f.member = [][]string{{ch}}
+	b.start()
+	if ts, _ := st.KV(boardKey(ch)); ts == "" {
+		t.Fatal("start must discover channels and post their boards")
+	}
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.1", Text: "x\n[ ] a"}))
+	b.Handle(reactIn(ch, "UALICE001", "raising_hand", "100.1", true))
+	tk, _ := st.Get(ch, "100.1")
+	if !tk.IsOwner("UALICE001") {
+		t.Fatal("a claim reaction must work in a discovered channel")
+	}
+	key := tk.Checklist()[0].Key
+	b.HandleInteraction(tick("UALICE001", "check:100.1:"+key, key))
+	if tk, _ = st.Get(ch, "100.1"); !tk.Checklist()[0].Checked {
+		t.Fatal("a checklist tick must work in a discovered channel")
+	}
+
+	start := b.now()
+	f.reset()
+	b.now = func() time.Time { return start.Add(25 * time.Hour) }
+	b.remindStale()
+	if f.find("post", "Still on it?") == nil {
+		t.Fatalf("stale reminders must run in discovered channels, calls: %+v", f.calls)
+	}
+	b.cfg.DoneRetainDays = 7
+	b.Handle(reactIn(ch, "UALICE001", "white_check_mark", "100.1", true))
+	b.now = func() time.Time { return start.Add(9 * 24 * time.Hour) }
+	b.sweepDone()
+	if tk, _ := st.Get(ch, "100.1"); tk != nil {
+		t.Fatal("the sweep must run in discovered channels")
+	}
+}
+
+func TestAutoChannelsStayLeft(t *testing.T) {
+	b, f, st := setupWith(t, "auto_channels: true")
+	f.member = [][]string{{ch, ch2}}
+	b.start()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.1", Text: "x\n[ ] a"}))
+	tk, _ := st.Get(ch, "100.1")
+	key := tk.Checklist()[0].Key
+
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.ChannelLeftEvent{Channel: ch}}})
+	f.reset()
+	b.HandleInteraction(tick("UALICE001", "check:100.1:"+key, key))
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.2", Text: "sent before the removal"}))
+	b.Handle(reactIn(ch, "UALICE001", "raising_hand", "100.1", true))
+	if len(f.calls) != 0 || slices.Contains(b.channels(), ch) {
+		t.Fatalf("a late event or a click on an old card must not serve a left channel again, calls: %+v, channels %v", f.calls, b.channels())
+	}
+
+	never := &task.Task{Channel: "CNEVER001", TS: "200.1", Reporter: "UREPORT01", Text: "x\n[ ] a"}
+	st.Save(never)
+	nk := never.Checklist()[0].Key
+	cb := tick("UALICE001", "check:200.1:"+nk, nk)
+	cb.Channel.ID = "CNEVER001"
+	b.HandleInteraction(cb)
+	if len(f.calls) != 0 || slices.Contains(b.channels(), "CNEVER001") {
+		t.Fatalf("a click alone must never start serving a channel, calls: %+v", f.calls)
+	}
+
+	b.Handle(joined("UBOT00001", ch))
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.3", Text: "back"}))
+	if tk, _ := st.Get(ch, "100.3"); tk == nil || !slices.Contains(b.channels(), ch) {
+		t.Fatal("an invite back must serve the channel again")
+	}
+
+	// An archived channel drops out, but the bot is still a member, so a message
+	// after unarchiving serves it again.
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.GroupArchiveEvent{Channel: ch2}}})
+	if slices.Contains(b.channels(), ch2) {
+		t.Fatal("an archived channel must drop out")
+	}
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, User: "UREPORT01", TimeStamp: "100.4", Text: "unarchived"}))
+	if !slices.Contains(b.channels(), ch2) {
+		t.Fatal("a message after unarchiving must serve the channel again")
+	}
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.ChannelArchiveEvent{Channel: ch2}}})
+	if slices.Contains(b.channels(), ch2) {
+		t.Fatal("channel_archive must drop the channel too")
+	}
+}
+
+func TestAutoChannelsRediscoverHeals(t *testing.T) {
+	b, f, st := setupWith(t, "auto_channels: true")
+	f.member = [][]string{{ch}}
+	b.start()
+
+	// A quick remove and re-invite whose second leave event arrives last strands
+	// the channel until the next listing, which knows the bot is a member.
+	left := func(c string) slackevents.EventsAPIEvent {
+		return slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.ChannelLeftEvent{Channel: c}}}
+	}
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.MemberLeftChannelEvent{User: "UBOT00001", Channel: ch}}})
+	b.Handle(joined("UBOT00001", ch))
+	b.Handle(left(ch))
+	if slices.Contains(b.channels(), ch) {
+		t.Fatal("precondition: the late leave strands the channel")
+	}
+	b.rediscover()
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.1", Text: "back"}))
+	if tk, _ := st.Get(ch, "100.1"); tk == nil {
+		t.Fatal("the next listing must serve a channel the bot is a member of again")
+	}
+
+	// A channel archived (unlisted) is dropped even after a late message re-added
+	// it; one unarchived (listed again) comes back with its board.
+	b.Handle(slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: &slackevents.ChannelArchiveEvent{Channel: ch}}})
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.2", Text: "late"}))
+	f.member = [][]string{{}}
+	b.rediscover()
+	if len(b.channels()) != 0 {
+		t.Fatalf("an unlisted channel must drop out, got %v", b.channels())
+	}
+	f.member = [][]string{{ch}, {ch2}}
+	f.reset()
+	b.rediscover()
+	if !slices.Equal(b.channels(), []string{ch, ch2}) || f.find("post", "loading board") == nil {
+		t.Fatalf("a listed channel must be served and get its board, got %v, calls %+v", b.channels(), f.calls)
+	}
+	if ts, _ := st.KV(boardKey(ch2)); ts == "" {
+		t.Fatal("a channel first found by a listing needs a board")
+	}
+
+	f.reset()
+	b.rediscover()
+	if len(f.calls) != 0 {
+		t.Fatalf("an unchanged listing must not touch any board, calls: %+v", f.calls)
+	}
+
+	// A failed listing changes nothing, and the next one retries.
+	f.memberE = fmt.Errorf("timeout")
+	b.rediscover()
+	if !slices.Equal(b.channels(), []string{ch, ch2}) {
+		t.Fatalf("a failed listing must keep the served set, got %v", b.channels())
+	}
+	f.memberE = nil
+	f.member = [][]string{{ch2}}
+	b.rediscover()
+	if !slices.Equal(b.channels(), []string{ch2}) {
+		t.Fatalf("the retry must apply, got %v", b.channels())
+	}
+}
+
+func TestAutoChannelsDiscoverFailure(t *testing.T) {
+	b, f, st := setupWith(t, "auto_channels: true")
+	f.memberE = fmt.Errorf("missing_scope")
+	b.discover()
+	if len(b.channels()) != 0 {
+		t.Fatalf("a failed listing serves nothing yet, got %v", b.channels())
+	}
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch, User: "UREPORT01", TimeStamp: "100.1", Text: "still works"}))
+	if tk, _ := st.Get(ch, "100.1"); tk == nil {
+		t.Fatal("events must still be served after a failed listing")
+	}
+}
+
+func TestInviteInExplicitMode(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(joined("UBOT00001", ch2))
+	if ts, _ := st.KV(boardKey(ch2)); ts == "" {
+		t.Fatal("an invite to a listed channel should post its board at once")
+	}
+	f.reset()
+	b.Handle(joined("UBOT00001", "COTHER001"))
+	if len(f.calls) != 0 || slices.Contains(b.channels(), "COTHER001") {
+		t.Fatalf("an invite to an unlisted channel must be ignored, calls: %+v", f.calls)
+	}
+	b.discover()
+	if !slices.Equal(b.channels(), []string{ch, ch2}) {
+		t.Fatalf("explicit mode serves exactly its list, got %v", b.channels())
 	}
 }
 

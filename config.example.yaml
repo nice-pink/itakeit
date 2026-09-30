@@ -1,8 +1,15 @@
 # IDs of the channels the bot serves (not their names). Find one under channel details ->
 # About. Each channel has its own tasks and board; all share the settings below. The bot
 # must be invited to each. A single `channel: C0123456789` is still accepted.
-channels:
-  - C0123456789
+# channels:
+#   - C0123456789
+
+# Instead of channels: serve every public or private channel the bot is a member of.
+# Inviting the bot then makes a channel a task channel, and removing it stops the bot
+# there. Needs the channels:read and groups:read scopes from the current manifest.
+# A `channel:` key next to it is ignored, so a config shared with itakeit-agent can
+# keep the agent's channel.
+auto_channels: true
 
 # SQLite file holding owners, statuses and the board message timestamp. Ignored when
 # a Postgres URL is set.

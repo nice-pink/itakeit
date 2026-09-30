@@ -36,6 +36,9 @@ func run(cfgPath string, debug bool) error {
 	if err != nil {
 		return err
 	}
+	if cfg.AutoChannels && cfg.LegacyChannel != "" {
+		slog.Warn("channel is ignored under auto_channels (it is kept for itakeit-agent)", "channel", cfg.LegacyChannel)
+	}
 	botToken, appToken := os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN")
 	if !strings.HasPrefix(botToken, "xoxb-") || !strings.HasPrefix(appToken, "xapp-") {
 		return errMissingTokens
@@ -53,7 +56,7 @@ func run(cfgPath string, debug bool) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("authenticated", "team", auth.Team, "bot_user", auth.UserID, "channels", cfg.Channels)
+	slog.Info("authenticated", "team", auth.Team, "bot_user", auth.UserID, "channels", cfg.Channels, "auto_channels", cfg.AutoChannels)
 
 	sm := socketmode.New(api, socketmode.OptionDebug(debug))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

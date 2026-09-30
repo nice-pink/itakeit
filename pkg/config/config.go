@@ -16,8 +16,13 @@ import (
 type Config struct {
 	// Channels lists the channel IDs the bot serves, all with the settings below.
 	// The older single `channel` key is still read and becomes a one-item list.
-	Channels        []string                 `yaml:"channels"`
-	LegacyChannel   string                   `yaml:"channel"` // folded into Channels by Parse
+	Channels []string `yaml:"channels"`
+	// LegacyChannel is folded into Channels by Parse, except under auto_channels,
+	// where it is kept but ignored: itakeit-agent reads `channel` from the same
+	// file and refuses to start without it.
+	LegacyChannel string `yaml:"channel"`
+	// AutoChannels serves every channel the bot is a member of instead of a list.
+	AutoChannels    bool                     `yaml:"auto_channels"`
 	DBPath          string                   `yaml:"db_path"`
 	DatabaseURL     string                   `yaml:"database_url"`
 	StaleAfterHours int                      `yaml:"stale_after_hours"`
@@ -82,19 +87,23 @@ func Parse(raw []byte) (*Config, error) {
 }
 
 func (c *Config) index() error {
-	if c.LegacyChannel != "" {
+	if c.LegacyChannel != "" && !c.AutoChannels {
 		if len(c.Channels) > 0 {
 			return errors.New("config: set channels or channel, not both")
 		}
 		c.Channels, c.LegacyChannel = []string{c.LegacyChannel}, ""
 	}
-	if len(c.Channels) == 0 {
-		return errors.New("config: channels is required (channel IDs like C0123456789)")
+	if c.AutoChannels {
+		if len(c.Channels) > 0 {
+			return errors.New("config: set channels or auto_channels, not both")
+		}
+	} else if len(c.Channels) == 0 {
+		return errors.New("config: channels is required (channel IDs like C0123456789), or set auto_channels: true")
 	}
 	c.channels = map[string]bool{}
 	for i, ch := range c.Channels {
 		ch = strings.TrimSpace(ch)
-		if !channelID.MatchString(ch) {
+		if !IsChannelID(ch) {
 			return fmt.Errorf("config: %q is not a channel ID (like C0123456789, from channel details -> About)", ch)
 		}
 		c.Channels[i] = ch
@@ -128,8 +137,13 @@ func (c *Config) index() error {
 	return nil
 }
 
-// Serves reports whether channel is one of the configured channels.
+// Serves reports whether channel is one of the configured channels. It is
+// always false under auto_channels, where the bot tracks membership itself.
 func (c *Config) Serves(channel string) bool { return c.channels[channel] }
+
+// IsChannelID reports whether id is a public or private channel ID, which rules
+// out direct messages (D...) and channel names.
+func IsChannelID(id string) bool { return channelID.MatchString(id) }
 
 // Action resolves a reaction name. Skin tone variants ("raising_hand::skin-tone-3")
 // resolve to their base emoji.

@@ -1,4 +1,6 @@
-<p align="center"><img src="assets/pixel_turtle.png" alt="itakeit pixel turtle" width="200"></p>
+<p align="right"><img src="assets/pixel_turtle.png" alt="itakeit pixel turtle" width="200"></p>
+
+https://itakeit.nice.pink
 
 # I take it
 
@@ -30,6 +32,7 @@ The manifest requests these bot scopes:
 | Scope | Used for |
 |---|---|
 | `channels:history`, `groups:history` | receiving messages in a public or private channel, and looking up messages posted before the bot was running |
+| `channels:read`, `groups:read` | noticing when the bot is invited or removed, so a board appears at once, and with `auto_channels` listing the channels it is a member of |
 | `chat:write` | status cards, the board, pings, private "only owners can…" hints |
 | `reactions:read` | receiving reaction events, and with `status_claims` checking who still reacts on a task |
 | `pins:write` | pinning the board |
@@ -43,8 +46,10 @@ If you change scopes later, reinstall the app so they take effect.
 One instance serves any number of channels. Each has its own tasks and board, and all share the settings in `config.yaml`. For every channel:
 
 1. Create the channel, e.g. `#itakeit`. Public or private both work.
-2. Invite the bot: `/invite @itakeit`. It only sees channels it is a member of, and it ignores channels missing from `channels`.
+2. Invite the bot: `/invite @itakeit`. It only sees channels it is a member of. The board appears as soon as it joins.
 3. Copy the channel ID: open the channel name, then **About**, and find it at the bottom (`C0123456789`).
+
+With `auto_channels: true` instead of a `channels` list, the bot serves every public or private channel it is a member of, and step 3 goes away: inviting the bot is what turns a channel into a task channel, and removing it (`/remove @itakeit`) or archiving the channel stops boards and reminders there. Checklist clicks on old cards keep working in a channel the bot still belongs to, and are ignored once it was removed. The bot re-lists its channels on every reminder check (at most every 15 minutes), so an invite, removal, archive or unarchive whose event was missed or arrived out of order is corrected by then. Invite it only where every top-level message should become a task. With a `channels` list, an invite to an unlisted channel is ignored.
 
 ### 3. Configure
 
@@ -52,7 +57,7 @@ One instance serves any number of channels. Each has its own tasks and board, an
 cp config.example.yaml config.yaml
 ```
 
-Set `channels` to the IDs from step 2. The older single `channel: C0123456789` key still works. Every other field has a default, and all fields are explained in the example file. Tokens come only from the environment and never go into the config file.
+Set `channels` to the IDs from step 2, or set `auto_channels: true`. The older single `channel: C0123456789` key still works. Under `auto_channels` a `channel` key is ignored (with a warning in the log), so a `config.yaml` shared with itakeit-agent, which needs `channel`, works for both. An app created before `auto_channels` lacks the `channels:read` and `groups:read` scopes and the member events: update it from the current manifest and reinstall it. Without them a `channels` list still works, but the board of a newly invited channel appears only with its first task, and `auto_channels` finds a channel only from its first message or reaction. Every other field has a default, and all fields are explained in the example file. Tokens come only from the environment and never go into the config file.
 
 ### 4. Run locally
 
@@ -84,14 +89,18 @@ With SQLite, set `db_path: /data/itakeit.db` in `config.yaml` so state survives 
 
 Set `ITAKEIT_DATABASE_URL` to use Postgres instead of SQLite, for example `ITAKEIT_DATABASE_URL=postgres://itakeit:secret@db:5432/itakeit` (add `-e ITAKEIT_DATABASE_URL` to `docker run`), or set `database_url` in `config.yaml`. The environment variable wins when both are set; prefer it, because the URL holds the password. `db_path` is then ignored. Connecting times out after 10 s unless the URL sets a non-zero `connect_timeout`. Fields the URL leaves out (host, user, password, `sslmode`) fall back to the standard `PG*` environment variables and `~/.pgpass`, so give the full URL when the environment carries another service's. The bot creates its tables on start (`tasks`, `owners`, `checks`, `kv`). These names are generic, so give it its own database, or its own schema: run `CREATE SCHEMA itakeit` first and add `search_path=itakeit` to the URL's query string. Existing SQLite data is not copied over; the bot starts empty and tasks come back as people react.
 
-Run **exactly one instance** per Slack app, with every channel in its `channels` list. Slack delivers each Socket Mode event to only one of an app's open connections, so two instances would each miss events meant for the other. A second, separately configured set of channels needs its own Slack app.
+### One instance per Slack app
 
-Merging instances that each served one channel: give the merged instance one database (Postgres, or the SQLite file of one of them). Channels whose state was in another database start empty, and the bot pins a fresh board in each; unpin the old one. Tasks come back as people react. A channel removed from `channels` keeps its rows in the database, and `done_retain_days` no longer cleans them up.
+Run **exactly one instance** per Slack app, with all its channels in one config. Slack delivers each Socket Mode event to only one of an app's open connections, so two instances would each miss events meant for the other. A second, separately configured set of channels needs its own Slack app.
+
+Merging instances that each served one channel: give the merged instance one database (Postgres, or the SQLite file of one of them). Channels whose state was in another database start empty, and the bot pins a fresh board in each; unpin the old one. Tasks come back as people react. A channel removed from `channels`, or with `auto_channels` a channel the bot was removed from or that was archived, keeps its rows in the database, and `done_retain_days` no longer cleans them up.
 
 ## Usage
 
 | Who | Does | Effect |
 |---|---|---|
+| anyone | invites the bot to a channel listed in `channels`, or to any channel with `auto_channels` | the channel's board is posted and pinned |
+| anyone | removes the bot from a channel, or archives it, with `auto_channels` | boards, reminders and checklist clicks stop there; tasks stay in the database |
 | anyone | posts a top-level message in a served channel | new task, status card in its thread, board updated |
 | anyone | reacts 🙋 on the task message | becomes an owner |
 | owner | removes 🙋 | stops owning it. When the last owner leaves, the status resets to unclaimed, except that a done task stays done. |
@@ -138,7 +147,7 @@ pkg/store       SQLite or Postgres persistence
 - A separate goroutine acknowledges each event the moment it arrives, so a slow Slack API call never delays an ack. Events still queued when the bot stops or crashes are not redelivered. Re-adding the reaction repairs it. A redelivered message never resets a task that already exists.
 - Slack API calls time out after 15 s and are retried up to 3 times on rate limits.
 - The board is posted as a placeholder and filled by an edit, because edits don't notify anyone, and reposting the board would otherwise ping every owner.
-- The channel is the record of what was said. The database holds only owners, statuses, timestamps, checklist ticks and the board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board, and tasks come back as people react.
+- The channel is the record of what was said. The database holds only owners, statuses, timestamps, checklist ticks and each channel's board message ID. Deleting the database loses claims and statuses but no conversation. The next start posts a fresh board in each channel, and tasks come back as people react.
 - If someone deletes the board or a status card, the bot posts and pins a new one on the next change.
 
 ## Development

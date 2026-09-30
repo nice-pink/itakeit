@@ -2,7 +2,7 @@
 
 > itakeit is dead simple task tracking in Slack channel threads: a free, self-hosted Slack bot that turns every top-level message in its dedicated Slack channels into a task. People claim a task by reacting 🙋, owners set its status with emoji reactions, and a pinned board in each channel counts the open tasks in each status and lists the oldest ones with their owners.
 
-itakeit runs as one Docker container with one SQLite file. It connects to Slack over Socket Mode, so it makes only outbound connections and needs no public URL, ingress or TLS certificate. The messages stay in Slack; the database holds only owners, statuses, timestamps, checklist ticks and the board message ID.
+itakeit runs as one Docker container with a SQLite file, or with Postgres when ITAKEIT_DATABASE_URL (or database_url in config.yaml) is set. It connects to Slack over Socket Mode, so it makes only outbound connections and needs no public URL, ingress or TLS certificate. The messages stay in Slack; the database holds only owners, statuses, timestamps, checklist ticks and each channel's board message ID.
 
 ## How it works
 
@@ -18,14 +18,14 @@ itakeit runs as one Docker container with one SQLite file. It connects to Slack 
 
 ## Setup
 
-1. Create a Slack app from the manifest in the repository (scopes: channels:history, groups:history, chat:write, reactions:read, pins:write).
+1. Create a Slack app from the manifest in the repository (scopes: channels:history, groups:history, channels:read, groups:read, chat:write, reactions:read, pins:write).
 2. Generate an app-level token with connections:write (SLACK_APP_TOKEN) and install the app to get the bot token (SLACK_BOT_TOKEN).
-3. Create one or more channels, invite the bot to each, and list their IDs under channels in config.yaml. All channels share the same settings; each has its own tasks and board.
-4. Run the image ghcr.io/nice-pink/itakeit:latest with both tokens in the environment. Run exactly one instance per Slack app, with all its channels in one config: Slack delivers each Socket Mode event to only one connection, so a second instance would miss events.
+3. Set auto_channels: true in config.yaml, create one or more channels and invite the bot to each. Every channel the bot is invited to becomes a task channel with its own tasks and board; removing the bot stops it there. All channels share the same settings.
+4. Run the image ghcr.io/nice-pink/itakeit:latest with both tokens in the environment. Run exactly one instance per Slack app; it serves every channel the bot is in. Slack delivers each Socket Mode event to only one connection, so a second instance would miss events.
 
 ## Related
 
-- itakeit-agent (https://github.com/nice-pink/itakeit-agent), also by nice-pink: a separate Slack app that claims tasks in an itakeit channel with 🙋, asks for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers the operator allows, and writes can require an approver's reaction.
+- itakeit-agent (https://github.com/nice-pink/itakeit-agent), also by nice-pink: a separate Slack app that claims tasks in one itakeit channel (set with channel: in its config) with 🙋, asks for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers the operator allows, and writes can require an approver's reaction.
 - Betimation (https://betimation.com), also by nice-pink: advanced and fun team task tracking. Projects and goals race on a live racetrack as tasks close, and the team bets on who finishes first. It has a Slack app too.
 
 ## Links

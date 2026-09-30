@@ -37,6 +37,21 @@ func TestChannels(t *testing.T) {
 	}
 }
 
+func TestAutoChannels(t *testing.T) {
+	c, err := Parse([]byte("auto_channels: true"))
+	if err != nil || !c.AutoChannels || len(c.Channels) != 0 || c.Serves("C1") {
+		t.Fatalf("auto_channels needs no list and serves nothing by itself: %+v %v", c, err)
+	}
+	// itakeit-agent shares the file and needs channel, so auto mode keeps and ignores it.
+	c, err = Parse([]byte("auto_channels: true\nchannel: C1"))
+	if err != nil || len(c.Channels) != 0 || c.Serves("C1") || c.LegacyChannel != "C1" {
+		t.Fatalf("channel must be kept but ignored under auto_channels: %+v %v", c, err)
+	}
+	if !IsChannelID("C0123") || !IsChannelID("G0123") || IsChannelID("D0123") || IsChannelID("#itakeit") {
+		t.Fatal("IsChannelID must accept public and private channel IDs only")
+	}
+}
+
 func TestDatabaseURL(t *testing.T) {
 	c, err := Parse([]byte("channel: C1\ndatabase_url: postgres://u:p@h/db"))
 	if err != nil || c.DatabaseURL != "postgres://u:p@h/db" {
@@ -72,6 +87,7 @@ func TestInvalid(t *testing.T) {
 		"missing channel": "db_path: x.db",
 		"empty channels":  "channels: []",
 		"both keys":       "channel: C1\nchannels: [C2]",
+		"auto and list":   "auto_channels: true\nchannels: [C1]",
 		"twice":           "channels: [C1, C1]",
 		"blank channel":   "channels: [C1, \"\"]",
 		"channel name":    "channels: [\"#itakeit\"]",

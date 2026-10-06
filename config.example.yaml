@@ -37,6 +37,10 @@ done_retain_days: 30
 # posted by a bot or integration. Without it the bot's name is posted as plain text and
 # nobody is pinged. Replies from this user clear needs_info, as a reporter's would.
 # bot_contact: U0123456789
+# Per-channel override by channel ID. Works with auto_channels too, since the keys need
+# not be listed in channels. Channels not listed here use bot_contact.
+# bot_contacts:
+#   C0123456789: U0123456789
 
 # false: only owners (who reacted with claim) can set a status. true: any status
 # reaction makes the reactor an owner, who stays one until they have no claim or

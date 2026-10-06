@@ -31,8 +31,11 @@ type Config struct {
 	StatusClaims    bool   `yaml:"status_claims"`
 	// BotContact is a Slack user ID that becomes the reporter of tasks posted by
 	// bots and integrations, so needs_info pings a person instead of the bot.
-	BotContact string                   `yaml:"bot_contact"`
-	Emoji      map[task.Action][]string `yaml:"emoji"`
+	BotContact string `yaml:"bot_contact"`
+	// BotContacts overrides BotContact per channel ID. Keys need not be listed in
+	// Channels, so it works under auto_channels too.
+	BotContacts map[string]string        `yaml:"bot_contacts"`
+	Emoji       map[task.Action][]string `yaml:"emoji"`
 
 	byEmoji  map[string]task.Action
 	channels map[string]bool
@@ -127,6 +130,15 @@ func (c *Config) index() error {
 	if c.BotContact != "" && !userID.MatchString(c.BotContact) {
 		return fmt.Errorf("config: bot_contact %q is not a Slack user ID (like U0123456789, from the profile's more menu -> Copy member ID)", c.BotContact)
 	}
+	for ch, u := range c.BotContacts {
+		if !IsChannelID(ch) {
+			return fmt.Errorf("config: bot_contacts key %q is not a channel ID (like C0123456789)", ch)
+		}
+		if !userID.MatchString(strings.TrimSpace(u)) {
+			return fmt.Errorf("config: bot_contacts[%s] %q is not a Slack user ID (like U0123456789)", ch, u)
+		}
+		c.BotContacts[ch] = strings.TrimSpace(u)
+	}
 	if len(c.Emoji[task.Claim]) == 0 {
 		return errors.New("config: emoji.claim needs at least one emoji")
 	}
@@ -149,6 +161,15 @@ func (c *Config) index() error {
 // Serves reports whether channel is one of the configured channels. It is
 // always false under auto_channels, where the bot tracks membership itself.
 func (c *Config) Serves(channel string) bool { return c.channels[channel] }
+
+// BotContactFor returns the user asked for details on tasks bots post in channel:
+// its bot_contacts entry, else bot_contact, else "" (no contact).
+func (c *Config) BotContactFor(channel string) string {
+	if u := c.BotContacts[channel]; u != "" {
+		return u
+	}
+	return c.BotContact
+}
 
 // IsChannelID reports whether id is a public or private channel ID, which rules
 // out direct messages (D...) and channel names.

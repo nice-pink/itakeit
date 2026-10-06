@@ -211,7 +211,7 @@ func reactIn(channel, user, emoji, ts string, added bool) slackevents.EventsAPIE
 }
 
 func TestBotContactIsReporter(t *testing.T) {
-	cfg := "channels: [" + ch + "]\nbot_contact: UCONTACT1"
+	cfg := "channels: [" + ch + ", " + ch2 + "]\nbot_contact: UCONTACT1\nbot_contacts:\n  " + ch2 + ": UCONTACT2"
 	b, f, _ := setupWith(t, cfg)
 
 	b.Handle(msg(&slackevents.MessageEvent{SubType: "bot_message", BotID: "BALERT001", Username: "alerts", TimeStamp: "100.1", Text: "disk full"}))
@@ -226,6 +226,14 @@ func TestBotContactIsReporter(t *testing.T) {
 	b.Handle(msg(&slackevents.MessageEvent{User: "UCONTACT1", TimeStamp: "100.5", ThreadTimeStamp: "100.1", Text: "it's the EU disk"}))
 	if f.find("post", "<@UALICE001>: <@UCONTACT1> added details") == nil {
 		t.Fatalf("a bot_contact reply should notify owners, calls: %+v", f.calls)
+	}
+
+	b.Handle(msg(&slackevents.MessageEvent{Channel: ch2, SubType: "bot_message", BotID: "BALERT001", TimeStamp: "300.1", Text: "other channel"}))
+	b.Handle(reactIn(ch2, "UALICE001", "raising_hand", "300.1", true))
+	f.reset()
+	b.Handle(reactIn(ch2, "UALICE001", "question", "300.1", true))
+	if f.find("post", "<@UCONTACT2>: <@UALICE001> needs more details") == nil {
+		t.Fatalf("a bot_contacts entry should override bot_contact, calls: %+v", f.calls)
 	}
 
 	f.reset()

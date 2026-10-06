@@ -66,6 +66,20 @@ func TestBotContact(t *testing.T) {
 	}
 }
 
+func TestBotContacts(t *testing.T) {
+	c, err := Parse([]byte("auto_channels: true\nbot_contact: U0123ABCD\nbot_contacts:\n  C2: U0456EFGH\n  C3: U0789JKLM"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BotContactFor("C2") != "U0456EFGH" || c.BotContactFor("C9") != "U0123ABCD" {
+		t.Fatalf("per-channel contact must win, default otherwise: %+v", c)
+	}
+	c, _ = Parse([]byte("channel: C1\nbot_contacts:\n  C2: U0456EFGH"))
+	if c.BotContactFor("C1") != "" {
+		t.Fatal("no default means no contact outside bot_contacts")
+	}
+}
+
 func TestDoneRetainOff(t *testing.T) {
 	c, err := Parse([]byte("channel: C1\ndone_retain_days: -1"))
 	if err != nil || c.DoneRetain() != 0 {
@@ -104,6 +118,8 @@ func TestInvalid(t *testing.T) {
 		"bad yaml":        "channel: [",
 		"negative retain": "channel: C1\ndone_retain_days: -2",
 		"bot contact":     "channel: C1\nbot_contact: alice",
+		"contacts key":    "channel: C1\nbot_contacts:\n  general: U0456EFGH",
+		"contacts user":   "channel: C1\nbot_contacts:\n  C2: alice",
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {

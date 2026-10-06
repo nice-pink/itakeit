@@ -375,7 +375,7 @@ func (b *Bot) onMessage(ev *slackevents.MessageEvent) {
 		if b.get(ev.Channel, ev.TimeStamp) != nil {
 			return // redelivered event
 		}
-		b.create(ev.Channel, ev.TimeStamp, b.reporter(ev.User, ev.Username, ev.BotID), ev.Text)
+		b.create(ev.Channel, ev.TimeStamp, b.reporter(ev.Channel, ev.User, ev.Username, ev.BotID), ev.Text)
 	}
 }
 
@@ -528,7 +528,7 @@ func (b *Bot) adopt(channel, ts string) *task.Task {
 	default:
 		return nil
 	}
-	return b.create(channel, ts, b.reporter(m.User, m.Username, m.BotID), m.Text)
+	return b.create(channel, ts, b.reporter(channel, m.User, m.Username, m.BotID), m.Text)
 }
 
 func (b *Bot) remindStale() {
@@ -729,12 +729,12 @@ func hours(d time.Duration) string {
 func isRoot(threadTS, ts string) bool { return threadTS == "" || threadTS == ts }
 
 // reporter names who to ask for details. A message from a bot or integration
-// reports as the configured bot_contact when there is one, since the bot can't
+// reports as the channel's bot contact (bot_contacts, else bot_contact) when there is one, since the bot can't
 // answer a question and a plain-text name pings nobody.
-func (b *Bot) reporter(user, username, botID string) string {
+func (b *Bot) reporter(channel, user, username, botID string) string {
 	switch {
-	case botID != "" && b.cfg.BotContact != "":
-		return b.cfg.BotContact
+	case botID != "" && b.cfg.BotContactFor(channel) != "":
+		return b.cfg.BotContactFor(channel)
 	case user != "":
 		return user
 	case username != "":

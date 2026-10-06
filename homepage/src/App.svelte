@@ -17,7 +17,15 @@
     { title: 'Nudges for stale work', text: 'Owners who go quiet on a task get a reminder in the thread, repeated every configurable number of hours until they post or the status changes.' },
   ]
 
-  const config = `auto_channels: true\ndb_path: /data/itakeit.db`
+  const config = `auto_channels: true
+db_path: /data/itakeit.db
+
+# Optional: a Slack user ID (not a name) for tasks that bots and integrations post.
+# They become the reporter, so needs_info pings them, and their reply clears it.
+# bot_contact: U0123456789
+# Per-channel override by channel ID, also with auto_channels.
+# bot_contacts:
+#   C0123456789: U0456789012`
 
   const run = `docker run -d --name itakeit --restart unless-stopped -e SLACK_BOT_TOKEN -e SLACK_APP_TOKEN -v "$PWD/config.yaml:/config/config.yaml:ro" -v itakeit-data:/data ${image}`
 
@@ -124,7 +132,7 @@ volumes:
       </li>
       <li>
         <h3>Write config.yaml</h3>
-        <p>Two lines are enough. Every other setting has a default. Emoji, reminder interval, board size and <code>status_claims</code> (let anyone set a status without claiming first) are documented in <a href="{repo}/blob/main/config.example.yaml">config.example.yaml</a>.</p>
+        <p>Two lines are enough. Every other setting has a default. <code>bot_contact</code> is optional: without it, ❓ on a task posted by a bot or integration names the bot as plain text and pings nobody. Emoji, reminder interval, board size and <code>status_claims</code> (let anyone set a status without claiming first) are documented in <a href="{repo}/blob/main/config.example.yaml">config.example.yaml</a>.</p>
         <Code code={config} label="config.yaml" />
         <p>The container runs as uid 65532, so the file must be readable by others: <code>chmod 644 config.yaml</code>.</p>
       </li>

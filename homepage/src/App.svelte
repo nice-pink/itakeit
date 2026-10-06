@@ -4,7 +4,7 @@
   import Demo from './lib/Demo.svelte'
   import Emojify from './lib/Emojify.svelte'
   import RaiseHand from './lib/RaiseHand.svelte'
-  import { agentPage, image, messagerPage, repo } from './lib/site'
+  import { agentPage, image, messengerPage, repo } from './lib/site'
 
   const features = [
     { title: 'Every message is a task', text: 'Post an issue in a task channel. The bot replies in its thread with a status card.' },
@@ -60,7 +60,7 @@ volumes:
       <a href="#setup">Setup</a>
       <a href="#usage">Usage</a>
       <a href={agentPage}>Agent</a>
-      <a href={messagerPage}>Messager</a>
+      <a href={messengerPage}>Messenger</a>
       <a href={repo}>GitHub</a>
     </nav>
   </div>
@@ -165,7 +165,7 @@ volumes:
         <b>Want tasks worked on, not just tracked?</b> <a href={agentPage}>itakeit-agent</a> is a separate Slack app that claims tasks in the channels itakeit serves with <RaiseHand /> like a teammate, asks the reporter for missing details, and replies in the thread with a proposed fix or the finished work. It runs Claude Code with only the tools and MCP servers you allow, and writes can wait for an approver's reaction.
       </div>
       <div class="note agent">
-        <b>Tasks hiding in other messages?</b> <a href={messagerPage}>itakeit-messager</a> is a separate Slack app that reads messages from other channels, HTTP and standard input, asks Claude or Langdock whether each contains a task, and posts the tasks to the channel itakeit serves. It also sets a reminder in the thread when a message asks for one.
+        <b>Tasks hiding in other messages?</b> <a href={messengerPage}>itakeit-messenger</a> is a separate Slack app that reads messages from other channels, HTTP and standard input, asks Claude or Langdock whether each contains a task, and posts the tasks to the channel itakeit serves. It also sets a reminder in the thread when a message asks for one.
       </div>
     </div>
   </section>

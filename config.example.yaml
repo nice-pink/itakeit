@@ -33,6 +33,11 @@ board_max_tasks: 50
 # many days, checked hourly. Messages and cards in Slack are kept. -1 keeps them forever.
 done_retain_days: 30
 
+# Slack user ID (not a name) asked for details when someone reacts needs_info on a task
+# posted by a bot or integration. Without it the bot's name is posted as plain text and
+# nobody is pinged. Replies from this user clear needs_info, as a reporter's would.
+# bot_contact: U0123456789
+
 # false: only owners (who reacted with claim) can set a status. true: any status
 # reaction makes the reactor an owner, who stays one until they have no claim or
 # status reaction left on the task message.

@@ -59,6 +59,13 @@ func TestDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestBotContact(t *testing.T) {
+	c, err := Parse([]byte("channel: C1\nbot_contact: \" U0123ABCD \""))
+	if err != nil || c.BotContact != "U0123ABCD" {
+		t.Fatalf("bot_contact not read: %+v %v", c, err)
+	}
+}
+
 func TestDoneRetainOff(t *testing.T) {
 	c, err := Parse([]byte("channel: C1\ndone_retain_days: -1"))
 	if err != nil || c.DoneRetain() != 0 {
@@ -96,6 +103,7 @@ func TestInvalid(t *testing.T) {
 		"duplicate emoji": "channel: C1\nemoji:\n  claim: [a]\n  done: [a]",
 		"bad yaml":        "channel: [",
 		"negative retain": "channel: C1\ndone_retain_days: -2",
+		"bot contact":     "channel: C1\nbot_contact: alice",
 	}
 	for name, raw := range cases {
 		if _, err := Parse([]byte(raw)); err == nil {

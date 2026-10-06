@@ -22,14 +22,17 @@ type Config struct {
 	// before it read channels and auto_channels still sets `channel` for it.
 	LegacyChannel string `yaml:"channel"`
 	// AutoChannels serves every channel the bot is a member of instead of a list.
-	AutoChannels    bool                     `yaml:"auto_channels"`
-	DBPath          string                   `yaml:"db_path"`
-	DatabaseURL     string                   `yaml:"database_url"`
-	StaleAfterHours int                      `yaml:"stale_after_hours"`
-	BoardMaxTasks   int                      `yaml:"board_max_tasks"`
-	DoneRetainDays  int                      `yaml:"done_retain_days"`
-	StatusClaims    bool                     `yaml:"status_claims"`
-	Emoji           map[task.Action][]string `yaml:"emoji"`
+	AutoChannels    bool   `yaml:"auto_channels"`
+	DBPath          string `yaml:"db_path"`
+	DatabaseURL     string `yaml:"database_url"`
+	StaleAfterHours int    `yaml:"stale_after_hours"`
+	BoardMaxTasks   int    `yaml:"board_max_tasks"`
+	DoneRetainDays  int    `yaml:"done_retain_days"`
+	StatusClaims    bool   `yaml:"status_claims"`
+	// BotContact is a Slack user ID that becomes the reporter of tasks posted by
+	// bots and integrations, so needs_info pings a person instead of the bot.
+	BotContact string                   `yaml:"bot_contact"`
+	Emoji      map[task.Action][]string `yaml:"emoji"`
 
 	byEmoji  map[string]task.Action
 	channels map[string]bool
@@ -38,6 +41,8 @@ type Config struct {
 // channelID matches public (C) and private (G, older) channel IDs. A channel name
 // such as #itakeit would otherwise load fine and be ignored forever.
 var channelID = regexp.MustCompile(`^[CG][A-Z0-9]+$`)
+
+var userID = regexp.MustCompile(`^[UW][A-Z0-9]{6,}$`)
 
 // Defaults applied for any field left empty in the file.
 var Defaults = Config{
@@ -117,6 +122,10 @@ func (c *Config) index() error {
 	}
 	if c.DoneRetainDays < -1 {
 		return errors.New("config: done_retain_days must be positive, or -1 to keep done tasks forever")
+	}
+	c.BotContact = strings.TrimSpace(c.BotContact)
+	if c.BotContact != "" && !userID.MatchString(c.BotContact) {
+		return fmt.Errorf("config: bot_contact %q is not a Slack user ID (like U0123456789, from the profile's more menu -> Copy member ID)", c.BotContact)
 	}
 	if len(c.Emoji[task.Claim]) == 0 {
 		return errors.New("config: emoji.claim needs at least one emoji")

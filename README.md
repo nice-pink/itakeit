@@ -125,7 +125,7 @@ Editing the task message updates its line on the board. Deleting it removes the 
 
 To reopen a done task that has no owners left, claim it with 🙋 and then set any other status. With `status_claims` on, setting the other status is enough.
 
-Messages from integrations and webhooks count as tasks too, with the integration's name as the reporter. The bot can't @-mention them, so ❓ posts their name as plain text.
+Messages from integrations and webhooks count as tasks too, with the integration's name as the reporter. The bot can't @-mention them, so ❓ posts their name as plain text, unless `bot_contact` names a Slack user: that user becomes the reporter of those tasks and is pinged by ❓ instead, and their reply clears the status.
 
 ### Adapting it
 

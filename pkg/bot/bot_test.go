@@ -210,6 +210,34 @@ func reactIn(channel, user, emoji, ts string, added bool) slackevents.EventsAPIE
 	return slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: data}}
 }
 
+func TestBotContactIsReporter(t *testing.T) {
+	cfg := "channels: [" + ch + "]\nbot_contact: UCONTACT1"
+	b, f, _ := setupWith(t, cfg)
+
+	b.Handle(msg(&slackevents.MessageEvent{SubType: "bot_message", BotID: "BALERT001", Username: "alerts", TimeStamp: "100.1", Text: "disk full"}))
+	b.Handle(react("UALICE001", "raising_hand", "100.1", true))
+	f.reset()
+	b.Handle(react("UALICE001", "question", "100.1", true))
+	if f.find("post", "<@UCONTACT1>: <@UALICE001> needs more details") == nil {
+		t.Fatalf("needs_info on a bot task should ping bot_contact, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{User: "UCONTACT1", TimeStamp: "100.5", ThreadTimeStamp: "100.1", Text: "it's the EU disk"}))
+	if f.find("post", "<@UALICE001>: <@UCONTACT1> added details") == nil {
+		t.Fatalf("a bot_contact reply should notify owners, calls: %+v", f.calls)
+	}
+
+	f.reset()
+	b.Handle(msg(&slackevents.MessageEvent{User: "UHUMAN001", TimeStamp: "101.1", Text: "human task"}))
+	b.Handle(react("UALICE001", "raising_hand", "101.1", true))
+	f.reset()
+	b.Handle(react("UALICE001", "question", "101.1", true))
+	if f.find("post", "<@UHUMAN001>: <@UALICE001> needs more details") == nil {
+		t.Fatalf("human reporters are unaffected by bot_contact, calls: %+v", f.calls)
+	}
+}
+
 func TestLifecycle(t *testing.T) {
 	b, f, st := setup(t)
 

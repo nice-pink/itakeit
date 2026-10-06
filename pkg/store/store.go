@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS checks (
 	channel TEXT NOT NULL, ts TEXT NOT NULL, item TEXT NOT NULL, checked BOOLEAN NOT NULL,
 	PRIMARY KEY (channel, ts, item),
 	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS reminders (
+	channel TEXT NOT NULL, ts TEXT NOT NULL, "user" TEXT NOT NULL, due BIGINT NOT NULL,
+	PRIMARY KEY (channel, ts, "user"),
+	FOREIGN KEY (channel, ts) REFERENCES tasks (channel, ts) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 
 type Store struct {
@@ -174,6 +178,44 @@ func (s *Store) DeleteDone(channel string, cutoff time.Time) (int64, error) {
 		return 0, err
 	}
 	return r.RowsAffected()
+}
+
+// Reminder is a user's request to be reminded of a task at Due.
+type Reminder struct {
+	Channel, TS, User string
+	Due               time.Time
+}
+
+// SetReminder stores the reminder, replacing the user's earlier one on the same task.
+func (s *Store) SetReminder(r Reminder) error {
+	_, err := s.db.Exec(s.q(`INSERT INTO reminders VALUES (?,?,?,?)
+		ON CONFLICT (channel, ts, "user") DO UPDATE SET due = excluded.due`), r.Channel, r.TS, r.User, r.Due.Unix())
+	return err
+}
+
+// DueReminders lists reminders due at or before now, oldest first.
+func (s *Store) DueReminders(now time.Time) ([]Reminder, error) {
+	rows, err := s.db.Query(s.q(`SELECT channel, ts, "user", due FROM reminders WHERE due <= ? ORDER BY due, channel, ts`), now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Reminder
+	for rows.Next() {
+		var r Reminder
+		var due int64
+		if err := rows.Scan(&r.Channel, &r.TS, &r.User, &due); err != nil {
+			return nil, err
+		}
+		r.Due = time.Unix(due, 0)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteReminder(r Reminder) error {
+	_, err := s.db.Exec(s.q(`DELETE FROM reminders WHERE channel = ? AND ts = ? AND "user" = ?`), r.Channel, r.TS, r.User)
+	return err
 }
 
 // KV returns "" when the key is unset.

@@ -39,6 +39,7 @@ type API interface {
 	AddPin(channel string, item slack.ItemRef) error
 	GetReactions(item slack.ItemRef, p slack.GetReactionsParameters) (slack.ReactedItem, error)
 	GetConversationsForUser(p *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
+	GetUserInfo(user string) (*slack.User, error)
 }
 
 type Bot struct {
@@ -66,6 +67,8 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 	b.start()
 	tick := time.NewTicker(staleInterval(b.cfg.StaleAfter()))
 	defer tick.Stop()
+	remind := time.NewTicker(time.Minute)
+	defer remind.Stop()
 	var sweep <-chan time.Time // nil, never fires, when cleanup is off
 	if b.cfg.DoneRetain() > 0 {
 		b.sweepDone()
@@ -82,6 +85,8 @@ func (b *Bot) Run(ctx context.Context, sm *socketmode.Client) error {
 		case <-tick.C:
 			b.rediscover()
 			b.remindStale()
+		case <-remind.C:
+			b.sendReminders()
 		case <-sweep:
 			b.sweepDone()
 		case e := <-events:
@@ -369,7 +374,7 @@ func (b *Bot) onMessage(ev *slackevents.MessageEvent) {
 			return
 		}
 		if !isRoot(ev.ThreadTimeStamp, ev.TimeStamp) {
-			b.onReply(ev.Channel, ev.ThreadTimeStamp, ev.User)
+			b.onReply(ev.Channel, ev.ThreadTimeStamp, ev.User, ev.Text)
 			return
 		}
 		if b.get(ev.Channel, ev.TimeStamp) != nil {
@@ -394,10 +399,13 @@ func (b *Bot) create(channel, ts, reporter, text string) *task.Task {
 	return t
 }
 
-func (b *Bot) onReply(channel, threadTS, user string) {
+func (b *Bot) onReply(channel, threadTS, user, text string) {
 	t := b.get(channel, threadTS)
 	if t == nil {
 		return
+	}
+	if b.onRemind(t, user, text) {
+		return // a reminder request is not task activity
 	}
 	eff := t.Reply(user, b.now())
 	b.save(t)
@@ -405,6 +413,99 @@ func (b *Bot) onReply(channel, threadTS, user string) {
 		b.say(t, fmt.Sprintf("%s: %s added details.", task.Mentions(t.Owners), task.Mention(t.Reporter)))
 		b.updateCard(t)
 		b.refreshBoard(t.Channel)
+	}
+}
+
+// onRemind handles a "remind me ..." reply from anyone. It reports whether the
+// reply was one, in which case it is not treated as an ordinary reply. Anything
+// that starts with "remind me" but cannot be read gets a private usage hint, so
+// a request never fails silently or counts as task activity.
+func (b *Bot) onRemind(t *task.Task, user, text string) bool {
+	if user == "" || !task.IsRemind(text) {
+		return false
+	}
+	say := func(msg string) {
+		if _, err := b.api.PostEphemeral(t.Channel, user, slack.MsgOptionText(msg, false), slack.MsgOptionTS(t.TS)); err != nil {
+			slog.Warn("reminder ack", "ts", t.TS, "err", err)
+		}
+	}
+	if !t.Open() {
+		say("This task is done, so no reminder was set.")
+		return true
+	}
+	loc := time.UTC
+	if u, err := b.api.GetUserInfo(user); err != nil {
+		slog.Warn("user info", "user", user, "err", err)
+	} else if l, err := time.LoadLocation(u.TZ); err == nil {
+		loc = l
+	}
+	due, ok := task.ParseRemind(text, b.now(), loc)
+	if !ok {
+		say("I could not read that time. Try `remind me tomorrow`, `remind me monday at 15:00`, `remind me in 3 hours` or `remind me at 15:00`.")
+		return true
+	}
+	if err := b.store.SetReminder(store.Reminder{Channel: t.Channel, TS: t.TS, User: user, Due: due}); err != nil {
+		slog.Error("set reminder", "ts", t.TS, "err", err)
+		say("Could not save the reminder, try again.")
+		return true
+	}
+	say(fmt.Sprintf("I will remind you on %s.", due.In(loc).Format("Mon 2 Jan 15:04 MST")))
+	return true
+}
+
+// remindGrace is how long past its due time a reminder that cannot be
+// delivered is retried before it is dropped.
+const remindGrace = 6 * time.Hour
+
+// permanentDM lists Slack errors that retrying cannot fix.
+var permanentDM = []string{"user_not_found", "user_disabled", "cannot_dm_bot", "channel_not_found", "is_archived", "missing_scope", "not_authed"}
+
+// sendReminders DMs every due reminder. Reminders of done or deleted tasks are
+// dropped. A store error or a failed DM keeps the reminder for the next tick,
+// except for a permanent Slack error or once remindGrace has passed. Each
+// reminder is deleted before its DM goes out, so a store that cannot delete
+// never causes repeated DMs; the cost is a lost reminder if requeueing fails too.
+func (b *Bot) sendReminders() {
+	now := b.now()
+	due, err := b.store.DueReminders(now)
+	if err != nil {
+		slog.Error("due reminders", "err", err)
+		return
+	}
+	for _, r := range due {
+		t, err := b.store.Get(r.Channel, r.TS)
+		if err != nil {
+			slog.Error("get task for reminder", "ts", r.TS, "err", err)
+			continue
+		}
+		if t == nil || !t.Open() {
+			if err := b.store.DeleteReminder(r); err != nil {
+				slog.Error("delete reminder", "ts", r.TS, "err", err)
+			}
+			continue
+		}
+		// Delete before sending: a store that cannot delete would otherwise
+		// resend the same DM every tick. A transient send failure puts it back.
+		if err := b.store.DeleteReminder(r); err != nil {
+			slog.Error("delete reminder", "ts", r.TS, "err", err)
+			continue
+		}
+		link := t.Permalink
+		if link == "" {
+			link = fmt.Sprintf("<#%s>", t.Channel)
+		}
+		text := fmt.Sprintf(":alarm_clock: You asked to be reminded of this task: %s", link)
+		_, _, err = b.api.PostMessage(r.User, slack.MsgOptionText(text, false))
+		if err == nil {
+			continue
+		}
+		slog.Warn("send reminder", "ts", r.TS, "user", r.User, "err", err)
+		if now.Sub(r.Due) >= remindGrace || slices.ContainsFunc(permanentDM, func(e string) bool { return strings.Contains(err.Error(), e) }) {
+			continue
+		}
+		if err := b.store.SetReminder(r); err != nil {
+			slog.Error("requeue reminder", "ts", r.TS, "err", err)
+		}
 	}
 }
 

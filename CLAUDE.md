@@ -21,7 +21,7 @@ Dependency direction: `cmd/itakeit` → `pkg/bot` → `pkg/store`, `pkg/config` 
 - `pkg/task` is pure (no I/O). State transitions (`React`, `Reply`, `Stale`) mutate the task and return an `Effect`; `pkg/bot` turns the effect into Slack calls (re-render, ephemeral denial, ping reporter, ping owners). New behaviour goes in as a transition plus an effect, with the Slack side in `bot`. Card and board text rendering also lives here (`render.go`).
 - `pkg/bot` runs every event and the reminder ticker on one goroutine, which is why nothing in the app locks. A separate `ackLoop` goroutine acks envelopes immediately and queues them (buffer 1024, drops when full). Do not add goroutines that touch the store or tasks.
 - Slack is reached only through the `bot.API` interface. Adding a Slack call means extending that interface and `fakeAPI` in `pkg/bot/bot_test.go`.
-- `pkg/store` holds only owners, statuses, timestamps, checklist ticks and the board message ts (in `kv`). The channel is the source of truth for text; missed messages are recovered lazily by `adopt` via conversation history when someone reacts.
+- `pkg/store` holds only owners, statuses, timestamps, checklist ticks, personal reminders (`remind me` replies, delivered by DM from a one-minute tick) and the board message ts (in `kv`). The channel is the source of truth for text; missed messages are recovered lazily by `adopt` via conversation history when someone reacts.
 
 Gotchas:
 - The schema is `CREATE TABLE IF NOT EXISTS` with no migrations, and `Save` inserts positionally (`VALUES (?,?,...)`). Adding a column breaks existing databases and depends on column order.

@@ -102,3 +102,40 @@ func roundTrip(t *testing.T, open func() (*Store, error)) {
 		t.Fatalf("kv upsert, got %q", v)
 	}
 }
+
+func TestReminders(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "r.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Unix(1_700_000_000, 0)
+	s.Save(&task.Task{Channel: "C1", TS: "1.1", Status: task.InProgress, CreatedAt: now})
+	s.Save(&task.Task{Channel: "C1", TS: "2.1", Status: task.InProgress, CreatedAt: now})
+	set := func(ts, user string, due time.Time) {
+		if err := s.SetReminder(Reminder{Channel: "C1", TS: ts, User: user, Due: due}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("1.1", "UA", now.Add(time.Hour))
+	set("1.1", "UA", now.Add(3*time.Hour))
+	set("1.1", "UB", now.Add(2*time.Hour))
+	set("2.1", "UA", now.Add(time.Hour))
+	if due, _ := s.DueReminders(now); len(due) != 0 {
+		t.Fatalf("nothing is due yet, got %v", due)
+	}
+	due, err := s.DueReminders(now.Add(150 * time.Minute))
+	if err != nil || len(due) != 2 || due[0].TS != "2.1" || due[1].User != "UB" {
+		t.Fatalf("replace and order: got %+v %v", due, err)
+	}
+	s.Delete("C1", "2.1")
+	if due, _ = s.DueReminders(now.Add(150 * time.Minute)); len(due) != 1 {
+		t.Fatalf("task delete must cascade, got %+v", due)
+	}
+	if err := s.DeleteReminder(due[0]); err != nil {
+		t.Fatal(err)
+	}
+	if due, _ = s.DueReminders(now.Add(24 * time.Hour)); len(due) != 1 || due[0].User != "UA" {
+		t.Fatalf("want only UA's replaced reminder, got %+v", due)
+	}
+}

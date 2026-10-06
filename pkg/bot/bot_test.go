@@ -24,17 +24,25 @@ type call struct{ kind, channel, ts, thread, user, text string }
 
 // fakeAPI records every Slack call and hands out sequential timestamps.
 type fakeAPI struct {
-	calls   []call
-	seq     int
-	history map[string]slack.Message
-	missing map[string]bool                 // ts that UpdateMessage reports as message_not_found
-	errs    []string                        // errors the next UpdateMessage calls return, in order
-	held    map[string][]slack.ItemReaction // reactions.get result by message ts
-	heldErr error
-	posted  map[string]string // channel of every message the bot posted, by ts
-	member  [][]string        // users.conversations pages, one per cursor
-	memberE error
-	wrong   []string // calls that named a message in the wrong channel
+	calls       []call
+	seq         int
+	history     map[string]slack.Message
+	missing     map[string]bool                 // ts that UpdateMessage reports as message_not_found
+	errs        []string                        // errors the next UpdateMessage calls return, in order
+	held        map[string][]slack.ItemReaction // reactions.get result by message ts
+	heldErr     error
+	posted      map[string]string // channel of every message the bot posted, by ts
+	member      [][]string        // users.conversations pages, one per cursor
+	memberE     error
+	wrong       []string          // calls that named a message in the wrong channel
+	tz          map[string]string // user time zone by ID, UTC when absent
+	userLookups int
+	dmErr       error // returned by PostMessage to a user ID (a DM)
+}
+
+func (f *fakeAPI) GetUserInfo(u string) (*slack.User, error) {
+	f.userLookups++
+	return &slack.User{ID: u, TZ: f.tz[u]}, nil
 }
 
 // at records a call on message ts in channel c that the bot posted elsewhere.
@@ -52,6 +60,9 @@ func decode(opts []slack.MsgOption) (text, thread string) {
 func (f *fakeAPI) next() string { f.seq++; return fmt.Sprintf("900.%d", f.seq) }
 
 func (f *fakeAPI) PostMessage(c string, o ...slack.MsgOption) (string, string, error) {
+	if f.dmErr != nil && strings.HasPrefix(c, "U") {
+		return "", "", f.dmErr
+	}
 	text, thread := decode(o)
 	ts := f.next()
 	f.posted[ts] = c
@@ -1019,5 +1030,174 @@ func TestStatusClaims(t *testing.T) {
 	b.Handle(react("UBOB00001", "raising_hand", "100.1", false))
 	if tk, _ = st.Get(ch, "100.1"); !tk.IsOwner("UBOB00001") {
 		t.Fatalf("an unanswered reactions lookup keeps the owner, got %+v", tk)
+	}
+}
+
+func TestRemindMe(t *testing.T) {
+	b, f, st := setup(t)
+	f.tz = map[string]string{"UME": "Europe/Berlin"}
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	before := len(f.calls)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UME", TimeStamp: "100.2", ThreadTimeStamp: "100.1", Text: "remind me tomorrow"}))
+	if got := f.calls[before:]; len(got) != 1 || got[0].kind != "ephemeral" || got[0].user != "UME" || !strings.Contains(got[0].text, "I will remind you on") || !strings.Contains(got[0].text, "09:00 CET") {
+		t.Fatalf("want one ephemeral ack, got %+v", got)
+	}
+	tk, _ := st.Get(ch, "100.1")
+	if tk.LastActivity != tk.CreatedAt {
+		t.Error("a reminder request counted as activity")
+	}
+
+	b.sendReminders()
+	for _, c := range f.calls {
+		if c.channel == "UME" {
+			t.Fatal("reminder sent before it was due")
+		}
+	}
+	now := b.now()
+	b.now = func() time.Time { return now.Add(48 * time.Hour) }
+	b.sendReminders()
+	var dms []call
+	for _, c := range f.calls {
+		if c.channel == "UME" {
+			dms = append(dms, c)
+		}
+	}
+	if len(dms) != 1 || !strings.Contains(dms[0].text, "p1001") {
+		t.Fatalf("want one DM with the permalink, got %+v", dms)
+	}
+	b.sendReminders()
+	n := 0
+	for _, c := range f.calls {
+		if c.channel == "UME" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("reminder sent %d times", n)
+	}
+}
+
+func TestRemindSkipsDoneTask(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	b.Handle(react("UME", "white_check_mark", "100.1", true))
+	b.Handle(react("UME", "raising_hand", "100.1", true))
+	tk, _ := st.Get(ch, "100.1")
+	tk.Status = task.Done
+	st.Save(tk)
+	st.SetReminder(store.Reminder{Channel: ch, TS: "100.1", User: "UME", Due: b.now().Add(-time.Minute)})
+	b.sendReminders()
+	for _, c := range f.calls {
+		if c.channel == "UME" {
+			t.Fatal("reminder sent for a done task")
+		}
+	}
+	if due, _ := st.DueReminders(b.now()); len(due) != 0 {
+		t.Error("reminder of a done task not dropped")
+	}
+}
+
+func dmsTo(f *fakeAPI, user string) (n int) {
+	for _, c := range f.calls {
+		if c.channel == user {
+			n++
+		}
+	}
+	return n
+}
+
+func TestRemindUnreadableGetsHint(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	b.Handle(msg(&slackevents.MessageEvent{User: "UME", TimeStamp: "100.2", ThreadTimeStamp: "100.1", Text: "remind me whenever"}))
+	last := f.calls[len(f.calls)-1]
+	if last.kind != "ephemeral" || last.user != "UME" || !strings.Contains(last.text, "could not read") {
+		t.Fatalf("want a usage hint, got %+v", last)
+	}
+	if tk, _ := st.Get(ch, "100.1"); tk.LastActivity != tk.CreatedAt {
+		t.Error("unreadable request counted as activity")
+	}
+}
+
+func TestRemindOrdinaryReplyDoesNotLookUpUser(t *testing.T) {
+	b, f, _ := setup(t)
+	f.tz = map[string]string{}
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	b.Handle(msg(&slackevents.MessageEvent{User: "UME", TimeStamp: "100.2", ThreadTimeStamp: "100.1", Text: "looking into it"}))
+	if f.userLookups != 0 {
+		t.Errorf("%d users.info calls for an ordinary reply", f.userLookups)
+	}
+}
+
+func TestRemindOnDoneTaskIsRefused(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	tk, _ := st.Get(ch, "100.1")
+	tk.Status = task.Done
+	st.Save(tk)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UME", TimeStamp: "100.2", ThreadTimeStamp: "100.1", Text: "remind me tomorrow"}))
+	last := f.calls[len(f.calls)-1]
+	if !strings.Contains(last.text, "done") {
+		t.Fatalf("want a done-task notice, got %+v", last)
+	}
+	if due, _ := st.DueReminders(b.now().Add(100 * 24 * time.Hour)); len(due) != 0 {
+		t.Error("reminder stored for a done task")
+	}
+}
+
+func TestRemindReplacesEarlierReminder(t *testing.T) {
+	b, _, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	for _, w := range []string{"in 1h", "in 5 days"} {
+		b.Handle(msg(&slackevents.MessageEvent{User: "UME", TimeStamp: "100.2", ThreadTimeStamp: "100.1", Text: "remind me " + w}))
+	}
+	if due, _ := st.DueReminders(b.now().Add(2 * time.Hour)); len(due) != 0 {
+		t.Error("first reminder survived the replacement")
+	}
+	if due, _ := st.DueReminders(b.now().Add(6 * 24 * time.Hour)); len(due) != 1 {
+		t.Errorf("want one reminder, got %d", len(due))
+	}
+}
+
+func TestRemindDeliveryFailure(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	r := store.Reminder{Channel: ch, TS: "100.1", User: "UME", Due: b.now().Add(-time.Minute)}
+	st.SetReminder(r)
+
+	f.dmErr = slack.SlackErrorResponse{Err: "ratelimited"}
+	b.sendReminders()
+	if due, _ := st.DueReminders(b.now()); len(due) != 1 {
+		t.Fatal("reminder dropped on a transient DM error")
+	}
+
+	now := b.now()
+	b.now = func() time.Time { return now.Add(remindGrace + time.Hour) }
+	b.sendReminders()
+	if due, _ := st.DueReminders(b.now()); len(due) != 0 {
+		t.Fatal("reminder kept past the grace period")
+	}
+
+	for _, e := range []string{"user_not_found", "missing_scope", "not_authed"} {
+		st.SetReminder(store.Reminder{Channel: ch, TS: "100.1", User: "UME", Due: b.now().Add(-time.Minute)})
+		f.dmErr = slack.SlackErrorResponse{Err: e}
+		b.sendReminders()
+		if due, _ := st.DueReminders(b.now()); len(due) != 0 {
+			t.Fatalf("reminder kept after permanent DM error %s", e)
+		}
+	}
+}
+
+func TestRemindTaskGoneIsDropped(t *testing.T) {
+	b, f, st := setup(t)
+	b.Handle(msg(&slackevents.MessageEvent{User: "UREP", TimeStamp: "100.1", Text: "broken"}))
+	st.SetReminder(store.Reminder{Channel: ch, TS: "100.1", User: "UME", Due: b.now().Add(-time.Minute)})
+	st.Delete(ch, "100.1")
+	b.sendReminders()
+	if dmsTo(f, "UME") != 0 {
+		t.Error("reminder sent for a deleted task")
+	}
+	if due, _ := st.DueReminders(b.now()); len(due) != 0 {
+		t.Error("reminder survived its task")
 	}
 }

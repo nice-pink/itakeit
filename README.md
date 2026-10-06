@@ -36,10 +36,11 @@ The manifest requests these bot scopes:
 | `chat:write` | status cards, the board, pings, private "only owners can…" hints |
 | `reactions:read` | receiving reaction events, and with `status_claims` checking who still reacts on a task |
 | `pins:write` | pinning the board |
+| `users:read` | reading a user's time zone, so "remind me tomorrow" means their morning |
 
 The manifest also turns on **Interactivity**, which the checklist checkboxes need. Socket Mode delivers the clicks, so no request URL is required. An app created from an older manifest needs it switched on under **Interactivity & Shortcuts**.
 
-If you change scopes later, reinstall the app so they take effect.
+If you change scopes later, reinstall the app so they take effect. An app installed before reminders existed needs `users:read` added this way. Without it, `remind me` still works but computes times in UTC.
 
 ### 2. Prepare the channels
 
@@ -113,6 +114,7 @@ Merging instances that each served one channel: give the merged instance one dat
 | owner | replies in the thread | counts as activity and resets the reminder clock |
 | non-owner | reacts with a status emoji | ignored, and the user gets a private hint to claim first. With `status_claims: true` it makes them an owner and sets the status instead. |
 | owner | removes their last 🙋 or status reaction, with `status_claims: true` | stops owning it. An owner who still has any 🙋 or status reaction on the message stays one. |
+| anyone | replies `remind me <when>` in the thread | the bot sends them a DM with the task link when it is due, and confirms privately. It is not task activity. `<when>` is `tomorrow`, a weekday, `in 30m`, `in 3 hours`, `in 2 days`, `in 1w`, `at 15:00`, or a day plus a time (`tomorrow at 3pm`). A day alone means 09:00 in their Slack time zone (UTC if it cannot be read). A reply that starts with `remind me` but cannot be read gets a private hint. Neither counts as task activity. One reminder per person and task, a new one replaces it, and it is dropped if the task is done. A DM that fails is retried for 6 hours. |
 | anyone | ticks a checklist item on the status card | card and board show progress. An owner's tick counts as activity. Ticking the last item pings the owners (or the reporter, if unclaimed) to set ✅. |
 
 Reactions only count on the task message itself. Reactions on thread replies, the card or the board are ignored. Skin tone variants count as the base emoji.

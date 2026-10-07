@@ -77,7 +77,10 @@ volumes:
 <main id="top">
   <section class="hero wrap">
     <div class="pitch">
-      <img class="turtle" src="./turtle.png" alt="itakeit pixel turtle" width="400" height="259" />
+      <div class="says">
+        <img class="turtle" src="./turtle.png" alt="itakeit pixel turtle" width="400" height="259" />
+        <img class="bubble" src="./whoson.png" alt="Just want to know who's on it." width="1536" height="1024" />
+      </div>
       <h1>Task tracking in Slack threads. <span>Dead simple.</span></h1>
       <p class="lead"><b>itakeit</b> turns every message in its Slack channels into a task. People take it with <RaiseHand />, set the status with reactions, and a pinned board shows what is open. The work is tracked where you already talk about it.</p>
       <div class="cta">
@@ -202,7 +205,9 @@ volumes:
   nav a:hover { color: var(--green); }
 
   .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 3rem; align-items: center; padding-top: 3rem; padding-bottom: 4rem; }
-  .turtle { width: 170px; height: auto; image-rendering: pixelated; margin: 0 0 1rem -8px; }
+  .says { display: flex; align-items: flex-end; margin: 0 0 1rem; }
+  .turtle { width: 170px; height: auto; image-rendering: pixelated; margin: 0 0 0 -8px; flex: none; }
+  .bubble { width: 300px; max-width: 55%; height: auto; image-rendering: pixelated; margin: 0 0 1.5rem -1.5rem; }
   h1 { font: 800 clamp(2.3rem, 5.5vw, 3.8rem)/1.05 var(--sans); letter-spacing: -0.03em; margin: 0 0 1rem; }
   h1 span { color: var(--green); display: block; }
   .lead { font-size: 1.15rem; color: var(--muted); margin: 0 0 1.5rem; max-width: 34rem; }
@@ -250,6 +255,7 @@ volumes:
   @media (max-width: 860px) {
     .hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 1.5rem; }
     .turtle { width: 120px; }
+    .bubble { width: 230px; margin-left: -0.5rem; }
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     nav { gap: 0.8rem; }
     nav a { font-size: 0.85rem; }

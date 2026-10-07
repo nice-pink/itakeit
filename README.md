@@ -161,3 +161,7 @@ pkg/store       SQLite or Postgres persistence
 ```
 
 This runs `go test ./...` and builds `bin/itakeit`. The bot tests drive the real event handlers against a fake Slack API and a temporary SQLite file. `ITAKEIT_TEST_DATABASE_URL=postgres://...` also runs the store tests against Postgres, in a throwaway schema.
+
+## License
+
+GPL-3.0, see [LICENSE](LICENSE).

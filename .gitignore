@@ -13,3 +13,4 @@ events.jsonl
 .playwright-mcp/
 .vscode
 .DS_Store
+market/
